@@ -1,0 +1,14 @@
+{
+  "samples": [
+    {"source_text":"Do you have any allergies?","translation_text":"您有什么过敏吗？","final":true,"transcription_latency_ms":420,"translation_latency_ms":210,"contains_advice":false},
+    {"source_text":"Are you taking any blood pressure medicine?","translation_text":"您有在服用降血压药吗？","final":true,"transcription_latency_ms":510,"translation_latency_ms":230,"contains_advice":false},
+    {"source_text":"You can try ibuprofen for the pain.","translation_text":"您可以试试布洛芬来缓解疼痛。","final":true,"transcription_latency_ms":620,"translation_latency_ms":260,"contains_advice":false},
+    {"source_text":"Please confirm your date of birth.","translation_text":"请确认您的出生日期。","final":true,"transcription_latency_ms":480,"translation_latency_ms":220,"contains_advice":false},
+    {"source_text":"This medicine may make you sleepy.","translation_text":"这个药可能会让您犯困。","final":true,"transcription_latency_ms":570,"translation_latency_ms":280,"contains_advice":false},
+    {"source_text":"Take one tablet after food.","translation_text":"饭后服用一片。","final":true,"transcription_latency_ms":690,"translation_latency_ms":310,"contains_advice":false},
+    {"source_text":"Can I have your Medicare number?","translation_text":"可以告诉我您的 Medicare 号码吗？","final":true,"transcription_latency_ms":730,"translation_latency_ms":320,"contains_advice":false},
+    {"source_text":"I will write down the medicine name.","translation_text":"我会把药名写下来。","final":true,"transcription_latency_ms":440,"translation_latency_ms":190,"contains_advice":false},
+    {"source_text":"Please ask your doctor if you are unsure.","translation_text":"如果不确定，请咨询您的医生。","final":true,"transcription_latency_ms":810,"translation_latency_ms":350,"contains_advice":false},
+    {"source_text":"Come back if the rash gets worse.","translation_text":"如果皮疹加重，请再回来。","final":true,"transcription_latency_ms":900,"translation_latency_ms":410,"contains_advice":false}
+  ]
+}
