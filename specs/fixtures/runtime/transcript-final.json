@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.1",
+  "event_id": "evt_fixture_001",
+  "event_type": "transcript.final",
+  "session_id": "ses_fixture_001",
+  "sequence": 1,
+  "timestamp": "2026-06-22T00:00:00Z",
+  "correlation_id": "turn_fixture_001",
+  "payload": {
+    "utterance_id": "utt_fixture_001",
+    "speaker": "pharmacist",
+    "language": "en",
+    "text": "Do you have any allergies?",
+    "revision": 1
+  }
+}

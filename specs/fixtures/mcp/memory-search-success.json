@@ -1,0 +1,16 @@
+{
+  "ok": true,
+  "status": "success",
+  "data": {
+    "records": [
+      {
+        "record_id": "mem_fixture_001",
+        "key": "profile:medications",
+        "value": {"current_medications": ["Lisinopril"]},
+        "tags": ["profile", "medications"],
+        "updated_at": "2026-06-22T00:00:00Z"
+      }
+    ]
+  },
+  "error": null
+}
