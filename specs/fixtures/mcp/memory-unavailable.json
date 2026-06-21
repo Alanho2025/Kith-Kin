@@ -1,0 +1,11 @@
+{
+  "ok": false,
+  "status": "unavailable",
+  "data": null,
+  "error": {
+    "code": "MEMORY_UNAVAILABLE",
+    "message": "Authorised memory is temporarily unavailable.",
+    "retryable": true,
+    "fallback_code": "memory_unavailable"
+  }
+}
