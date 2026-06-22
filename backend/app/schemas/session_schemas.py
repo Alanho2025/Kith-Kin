@@ -52,4 +52,18 @@ class EndSessionResponse(BaseModel):
     ended_at: datetime
 
 
+class CardConfirmRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    confirmation_id: Annotated[str, Field(min_length=1, max_length=80)]
+
+
+class CardConfirmRecoveryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    confirmation_id: Annotated[str, Field(min_length=1, max_length=80)]
+    status: Literal["confirmed"] = "confirmed"
+    replayed: bool
+
+
 SessionIdentifier = Annotated[str, Field(min_length=1, max_length=80)]

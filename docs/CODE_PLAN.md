@@ -6,7 +6,7 @@ Execution mode: strict test-driven development
 
 ## Goal
 
-Build a local-first, production-shaped pharmacy companion demo with one backend-proxied Gemini Live session, faithful visual translation, ADK Router/Companion/Guardian reasoning, PostgreSQL-backed retrieval, confirmation-gated actions, redacted traces, and a React elderly-friendly UI.
+Build a local-first, production-shaped pharmacy companion demo with one backend-proxied Gemini Live session, faithful visual translation, ADK Router/Companion/Guardian reasoning, SQLite-backed retrieval, confirmation-gated actions, redacted traces, and a React elderly-friendly UI.
 
 ## Authority
 
@@ -97,7 +97,7 @@ Ticket close codes:
 | 02 | Canonical domain types and state machines | Backend/frontend fixtures agree; unit suites green |
 | 03 | Elderly UI on mock runtime | RTL and browser UX checkpoint |
 | 04 | Session ticket and fake WebSocket runtime | Ticket abuse and reconnect integration tests |
-| 05 | PostgreSQL RAG and stdio MCP | PostgreSQL-only integration and tool contract tests |
+| 05 | SQLite RAG and stdio MCP | SQLite-only integration and tool contract tests |
 | 06 | Gemini Live and translation sidecar | Provider fixtures plus opt-in real smoke |
 | 07 | ADK Router, Guardian, Companion | Deterministic orchestration tests and agent evals |
 | 08 | Card confirmation and half-duplex audio | Consent, replay, and audio ordering gates |
@@ -139,10 +139,12 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 
 ## Current Status
 
-- Phase 00: complete with deterministic fixture PASS; authenticated Gemini validation is explicitly `blocked_missing_credentials` and remains the external D1 checkpoint.
-- Phase 01: complete; dependency locks, environment examples, ignore policy, secret scanner, PostgreSQL Compose config, and quality toolchains are green.
+- Phase 00: checkpoint executed with credentials; backend Gemini Live connectivity and 10/10 input transcriptions pass, while the real text-translation sidecar remains `fail` on latency.
+- Phase 01: complete; dependency locks, environment examples, ignore policy, secret scanner, SQLite environment config, and quality toolchains are green.
 - Phase 02: complete; typed backend contracts cover every runtime event/command, card/MCP DTOs and state machines are green, and frontend/shared fixture mapping is green.
-- Phases 03–11 and 90: planned, not started.
+- Phase 03: implemented with accessible mock runtime UI, reducer/hooks, confirmation/Guardian/fallback/summary flows, and automated checks green; final 360px/1280px browser screenshot sign-off remains externally blocked and is not claimed.
+- Phase 04: implemented with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter; acceptance remains dependent on the Phase 03 browser gate.
+- Phases 05–11 and 90: planned, not started. Phase 06 must resolve the recorded translation-sidecar latency failure without changing the backend-proxy topology or lowering the Phase 00 threshold.
 
 ## Phase 00–02 Verification Record
 
@@ -152,13 +154,31 @@ Recorded 2026-06-22:
 |---|---|
 | Backend unit suite | 68 passed |
 | Ruff | all checks passed |
-| Mypy | 19 source files, no issues |
+| Mypy | 18 source files, no issues |
 | Frontend Vitest | 2 files, 5 tests passed |
 | Frontend ESLint/typecheck/build | passed |
 | Docker Compose config | valid |
-| Backend lock check | 83 packages resolved, lock current |
+| Backend lock check | 82 packages resolved, 77 audited, lock current |
 | Secret/source/bundle scan | `secret_scan_passed` |
 | Sanitised Live fixture | pass; 10/10 finals, 900 ms transcription P95, 410 ms translation P95, 0 contamination |
-| Real Live provider check | `blocked_missing_credentials`; no result fabricated |
+| Real backend Live connection | pass; Python async session sent one turn and received a complete audio response |
+| Real agent-mode input transcription | pass; 10/10 synthetic finals, 305 ms P95 |
+| Real text sidecar | `fail`; current-model evaluator recorded 2,056 ms P95 and `translation_latency_exceeded` |
+| Low-latency model comparison | faithful 10/10 translations, but 12,764 ms P95 under free-tier retries; still `fail` |
 
-The eval runner, PostgreSQL migrations, FastAPI runtime, ADK agents, and live provider adapters belong to later phases and are not claimed by this checkpoint.
+The credential-backed probe proves that the Python/FastAPI backend topology is viable; it is not the Phase 06 production adapter. The eval runner, SQLite migrations, FastAPI runtime, ADK agents, and live provider adapters belong to later phases and are not claimed by this checkpoint.
+
+## Phase 03–04 Verification Record
+
+Recorded 2026-06-22:
+
+| Check | Result |
+|---|---|
+| Phase 03 focused UI cycles | status, subtitle, selection/confirmation, Guardian, self-speak, fallback, summary, and accessibility covered |
+| Phase 03 automated checkpoint | frontend tests/lint/typecheck/build pass |
+| Phase 03 browser workflow | start, desktop conversation, selection, and confirmation verified; final cancel recheck and 360/1280 screenshots externally blocked |
+| Phase 04 API/WebSocket integration | 17 tests cover cookie, 4401/4403/4409/4410, event ordering, binary audio, bounded replay/fallback, and shared confirmation |
+| Phase 04 frontend backend adapter | ticket request and WebSocket event mapping contract covered |
+| Persistence/migrations | none; Phase 04 stores remain injected in-memory implementations |
+
+Phase 03 browser details and the remaining sign-off work are recorded in `docs/PHASE_03_BROWSER_QA.md`.

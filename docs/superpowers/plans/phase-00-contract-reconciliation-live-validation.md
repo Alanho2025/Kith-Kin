@@ -1,6 +1,6 @@
 # Phase 00: Contract Reconciliation and Live Validation Implementation Plan
 
-Status: completed with the real provider checkpoint explicitly `blocked_missing_credentials`
+Status: completed with the real provider checkpoint recorded as `fail` on translation latency
 
 > **For agentic workers:** execute inline with `superpowers:executing-plans` and `superpowers:test-driven-development`. Do not use real health data.
 
@@ -155,7 +155,7 @@ Revert only Phase 00 files; no persistent data exists.
 ## Checkpoint Checklist
 
 - [x] Fixture evaluation passes.
-- [x] Real status is honestly recorded as credential-blocked.
+- [x] Real status is honestly recorded from a credential-backed probe.
 - [x] No legacy knowledge tool remains as an expected MVP call.
 - [x] All MCP access remains behind backend services and adapters.
 - [x] The MVP app ticket is distinct from the future Gemini ephemeral token.
@@ -177,6 +177,7 @@ Canonical terminology, validation evaluator, fixture, report status, and selecte
 - Deterministic evaluator tests: `backend/tests/unit/domain/test_live_validation.py`.
 - Missing-credential CLI test: `backend/tests/unit/test_live_validation_cli.py`.
 - Fixture result: 10 utterances, 10 usable finals, transcription P95 900 ms, translation P95 410 ms, zero contamination.
-- Real provider result: no workspace credential; fixed result `blocked_missing_credentials`, exit code 2.
+- Real provider result: backend Live connection passed; 10/10 input transcriptions passed at 305 ms P95; the text sidecar failed at 2,056 ms P95 with `translation_latency_exceeded`.
+- Manual review found default-thinking output-shape failures; minimal thinking restored faithful single-sample output, while a faithful ten-sample Flash-Lite comparison still failed latency under provider retries and free-tier limits.
 - Evidence: `docs/LIVE_TRANSCRIPTION_VALIDATION.md`.
 - Migration, seed, cleanup: none; fixture contains synthetic phrases only.

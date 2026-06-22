@@ -51,7 +51,7 @@ artifacts/
 tmp/
 
 # Local database/runtime state
-.postgres-data/
+*.db
 *.sqlite
 *.sqlite3
 
@@ -63,3 +63,5 @@ tmp/
 
 # Worktrees
 .worktrees/
+
+.agents/skills/

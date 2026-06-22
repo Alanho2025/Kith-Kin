@@ -19,7 +19,7 @@ def test_gitignore_covers_sensitive_and_generated_artifacts() -> None:
         ".env",
         "!.env.example",
         "!**/.env.example",
-        ".postgres-data/",
+        "*.db",
         "evals/traces/",
         "output/",
         ".coverage",

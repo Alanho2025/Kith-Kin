@@ -1,5 +1,6 @@
 """Environment-backed application configuration with fail-closed validation."""
 
+from datetime import timedelta
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -24,14 +25,12 @@ class Settings(BaseSettings):
 
     deployment_mode: str = "local"
     live_transport: Literal["backend_proxy"] = "backend_proxy"
-    session_store: Literal["postgres"] = "postgres"
+    session_store: Literal["sqlite"] = "sqlite"
     mcp_transport: Literal["stdio"] = "stdio"
     notification_provider: Literal["stub"] = "stub"
 
-    database_url: str = "postgresql+asyncpg://kk_user:local_demo_only@localhost:5432/kithkin"
-    test_database_url: str = (
-        "postgresql+asyncpg://kk_user:local_demo_only@localhost:5433/kithkin_test"
-    )
+    database_url: str = "sqlite+aiosqlite:///kithkin.db"
+    test_database_url: str = "sqlite+aiosqlite:///kithkin_test.db"
 
     google_api_key: SecretStr = SecretStr("")
     google_genai_use_vertexai: bool = False
@@ -77,3 +76,7 @@ class Settings(BaseSettings):
             if not self.app_ws_cookie_secure:
                 raise ValueError("CONFIG_INSECURE_COOKIE")
         return self
+
+    @property
+    def app_ws_token_ttl_seconds_delta(self) -> timedelta:
+        return timedelta(seconds=self.app_ws_token_ttl_seconds)
