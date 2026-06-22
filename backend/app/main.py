@@ -13,6 +13,9 @@ from app.adapters.fake_live_adapter import FakeLiveAdapter
 from app.adapters.gemini_live_adapter import GeminiLiveAdapter
 from app.adapters.gemini_live_translate_adapter import GeminiLiveTranslateAdapter
 from app.adapters.gemini_text_adapter import GeminiTextAdapter
+from app.agents.companion_agent import CompanionAgent
+from app.agents.guardian_agent import GuardianAgent
+from app.agents.router_agent import RouterAgent
 from app.api.error_handlers import install_error_handlers
 from app.api.routes import cards, health, live, sessions
 from app.core.config import Settings
@@ -27,9 +30,11 @@ from app.repositories.visit_repository import VisitRepository
 from app.services.card_service import CardService
 from app.services.live_runtime_service import LiveRuntimeService
 from app.services.rag_service import RagService
+from app.services.runtime_command_service import RuntimeCommandService
 from app.services.session_service import SessionService
 from app.services.ticket_service import TicketService
 from app.services.translation_service import TranslationService
+from app.services.turn_orchestrator import TurnOrchestrator
 
 DEFAULT_DEVELOPMENT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
@@ -82,7 +87,17 @@ def create_app(
         session_store,
         ticket_use_store,
     )
-    card_service = CardService()
+    card_service = CardService(clock)
+    router_agent = RouterAgent()
+    guardian_agent = GuardianAgent()
+    companion_agent = CompanionAgent(clock)
+    turn_orchestrator = TurnOrchestrator(
+        router_agent,
+        guardian_agent,
+        companion_agent,
+        card_service,
+    )
+    runtime_command_service = RuntimeCommandService(card_service, user_id)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -109,6 +124,8 @@ def create_app(
     app.state.rag_service = rag_service
     app.state.gemini_live_adapter = gemini_live_adapter
     app.state.translation_service = translation_service
+    app.state.turn_orchestrator = turn_orchestrator
+    app.state.runtime_command_service = runtime_command_service
     app.state.session_service = session_service
     app.state.ticket_service = TicketService(resolved_settings, session_service, issuer)
     app.state.ticket_verifier = verifier
@@ -118,6 +135,9 @@ def create_app(
         FakeLiveAdapter(),
         clock,
         translation_service,
+        runtime_command_service,
+        turn_orchestrator,
+        user_id,
     )
 
     install_error_handlers(app)

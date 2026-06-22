@@ -21,6 +21,33 @@ class SafetyDecision(StrEnum):
     BLOCK = "block"
 
 
+class BackstopReason(StrEnum):
+    """Stable deterministic Guardian backstop reasons."""
+
+    NONE = "none"
+    PAYMENT_REQUEST = "payment_request"
+    IDENTITY_REQUEST = "identity_request"
+    ADDRESS_REQUEST = "address_request"
+    PROMPT_INJECTION = "prompt_injection"
+    MEDICAL_ADVICE = "medical_advice"
+
+
+class BackstopRisk(StrEnum):
+    """Risk levels emitted by the deterministic backstop."""
+
+    NORMAL = "normal"
+    PRIVACY = "privacy"
+    MEDICAL = "medical"
+
+
+class SafetyBackstopResult(StrEnum):
+    """Fail-closed deterministic screening result."""
+
+    ALLOW = "allow"
+    BLOCK = "block"
+    REQUIRE_CONFIRMATION = "require_confirmation"
+
+
 def disclosure_decision(
     category: SensitiveDataCategory,
     *,
@@ -37,3 +64,40 @@ def disclosure_decision(
     if guardian_approved and parent_confirmed:
         return SafetyDecision.ALLOW
     return SafetyDecision.REQUIRE_CONFIRMATION
+
+
+def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, BackstopReason]:
+    """Detect sensitive or unsafe requests without relying on a model."""
+    lowered = text.lower()
+    prompt_markers = ("ignore previous", "system prompt", "developer message")
+    if any(marker in lowered for marker in prompt_markers):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.PROMPT_INJECTION,
+        )
+    if any(marker in lowered for marker in ("credit card", "card number", "cvv")):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.PAYMENT_REQUEST,
+        )
+    if any(marker in lowered for marker in ("passport", "medicare", "driver licence")):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.IDENTITY_REQUEST,
+        )
+    if any(marker in lowered for marker in ("home address", "where do you live", "street address")):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.ADDRESS_REQUEST,
+        )
+    if any(marker in lowered for marker in ("stop taking", "change your dose", "take double")):
+        return (
+            SafetyBackstopResult.REQUIRE_CONFIRMATION,
+            BackstopRisk.MEDICAL,
+            BackstopReason.MEDICAL_ADVICE,
+        )
+    return SafetyBackstopResult.ALLOW, BackstopRisk.NORMAL, BackstopReason.NONE
