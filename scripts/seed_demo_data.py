@@ -18,6 +18,8 @@ from app.db.models.allergy import Allergy  # noqa: E402
 from app.db.models.medication import Medication  # noqa: E402
 from app.db.models.user import User  # noqa: E402
 from app.db.models.visit_summary import VisitSummary  # noqa: E402
+from app.db.models.drug_knowledge_entity import DrugKnowledgeEntity  # noqa: E402
+from app.db.models.drug_interaction_rule import DrugInteractionRule  # noqa: E402
 from app.db.session import create_engine, create_session_factory, initialize_database  # noqa: E402
 
 DEMO_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -31,6 +33,7 @@ NOW = datetime(2026, 6, 22, 0, 0, tzinfo=UTC)
 
 async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
     """Apply or remove deterministic demo rows."""
+    from uuid import uuid5, NAMESPACE_DNS
     engine = create_engine(database_url)
     await initialize_database(engine)
     factory = create_session_factory(engine)
@@ -40,6 +43,8 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
             await session.execute(delete(Allergy).where(Allergy.user_id == DEMO_USER_ID))
             await session.execute(delete(Medication).where(Medication.user_id == DEMO_USER_ID))
             await session.execute(delete(User).where(User.id == DEMO_USER_ID))
+            await session.execute(delete(DrugKnowledgeEntity))
+            await session.execute(delete(DrugInteractionRule))
             await session.commit()
             await engine.dispose()
             return {"users": 0, "medications": 0, "allergies": 0, "visit_summaries": 0}
@@ -93,6 +98,60 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
                 updated_at=NOW,
             )
         )
+        
+        # Seed drug knowledge entities
+        from app.data.drug_knowledge import DRUG_PROFILES, OTC_DRUGS, SUBSTANCES, INTERACTIONS
+        for name, info in DRUG_PROFILES.items():
+            await session.merge(
+                DrugKnowledgeEntity(
+                    id=uuid5(NAMESPACE_DNS, f"drug:{name}"),
+                    name=name,
+                    entity_type="prescription",
+                    class_name=info["class"],
+                    brands_or_sources=info.get("brands_au", []),
+                    indications_or_use=info.get("indications", []),
+                    warnings_or_notes=info.get("warnings", []),
+                    common_in_elderly=info.get("common_in_elderly", False),
+                )
+            )
+        for name, info in OTC_DRUGS.items():
+            await session.merge(
+                DrugKnowledgeEntity(
+                    id=uuid5(NAMESPACE_DNS, f"otc:{name}"),
+                    name=name,
+                    entity_type="otc",
+                    class_name=info["class"],
+                    brands_or_sources=info.get("brands_au", []),
+                    indications_or_use=[info.get("typical_use")] if info.get("typical_use") else [],
+                    warnings_or_notes=[info.get("elderly_note")] if info.get("elderly_note") else [],
+                    common_in_elderly=True,
+                )
+            )
+        for name, info in SUBSTANCES.items():
+            await session.merge(
+                DrugKnowledgeEntity(
+                    id=uuid5(NAMESPACE_DNS, f"substance:{name}"),
+                    name=name,
+                    entity_type="substance",
+                    class_name=info["class"],
+                    brands_or_sources=info.get("sources", []),
+                    indications_or_use=[],
+                    warnings_or_notes=[info.get("elderly_note")] if info.get("elderly_note") else [],
+                    common_in_elderly=False,
+                )
+            )
+            
+        # Seed interaction rules
+        for i, rule in enumerate(INTERACTIONS):
+            await session.merge(
+                DrugInteractionRule(
+                    id=uuid5(NAMESPACE_DNS, f"interaction:{i}:{rule.risk}"),
+                    risk=rule.risk,
+                    mechanism=rule.mechanism,
+                    recommendation=rule.recommendation,
+                    source=rule.source,
+                )
+            )
         await session.commit()
     await engine.dispose()
     return {"users": 1, "medications": 1, "allergies": 1, "visit_summaries": 1}

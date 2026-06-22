@@ -179,7 +179,11 @@ class LiveRuntimeService:
             return
         if self._user_id is None:
             raise RuntimeError("Missing user ID")
-        context = TrustedRequestContext(session_id=session_id, user_id=self._user_id, origin="runtime")
+        context = TrustedRequestContext(
+            session_id=session_id,
+            user_id=self._user_id,
+            origin="runtime",
+        )
         result = await self._cards.confirm_selected(event.payload.confirmation_id, context)
         confirmed = self._append_event(
             session_id,
