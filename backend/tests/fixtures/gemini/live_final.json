@@ -1,0 +1,10 @@
+{
+  "event_id": "provider_evt_final_1",
+  "type": "input_transcription",
+  "utterance_id": "utt_demo_1",
+  "speaker": "pharmacist",
+  "language": "en",
+  "text": "Do you have any allergies to antibiotics?",
+  "revision": 2,
+  "final": true
+}

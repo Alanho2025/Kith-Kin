@@ -18,6 +18,15 @@ TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
 }
+SKIPPED_DIRECTORY_NAMES = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+}
 SECRET_PATTERNS = {
     "google_api_key": re.compile(r"AIza[0-9A-Za-z_-]{35}"),
     "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -32,18 +41,38 @@ FRONTEND_FORBIDDEN_NAMES = {
 
 
 def _candidate_files() -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    candidates = {ROOT / line for line in result.stdout.splitlines() if line}
+    candidates = _git_candidate_files()
+    if candidates is None:
+        candidates = _walk_candidate_files()
     frontend_dist = ROOT / "frontend/dist"
     if frontend_dist.exists():
         candidates.update(path for path in frontend_dist.rglob("*") if path.is_file())
     return sorted(candidates)
+
+
+def _git_candidate_files() -> set[Path] | None:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
+        return None
+    return {ROOT / line for line in result.stdout.splitlines() if line}
+
+
+def _walk_candidate_files() -> set[Path]:
+    candidates: set[Path] = set()
+    for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT)
+        if any(part in SKIPPED_DIRECTORY_NAMES for part in relative.parts):
+            continue
+        if path.is_file():
+            candidates.add(path)
+    return candidates
 
 
 def _is_frontend_runtime(path: Path) -> bool:
