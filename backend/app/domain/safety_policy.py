@@ -82,7 +82,17 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.PAYMENT_REQUEST,
         )
-    if any(marker in lowered for marker in ("passport", "medicare", "driver licence")):
+    if any(marker in lowered for marker in (
+        "passport",
+        "medicare",
+        "driver licence",
+        "driver's licence",
+        "drivers licence",
+        "driver license",
+        "driver's license",
+        "drivers license",
+        "driving licence",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,

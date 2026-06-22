@@ -61,12 +61,16 @@ class TurnOrchestrator:
         event: TranscriptFinalEvent,
         context: TrustedRequestContext,
     ) -> TurnOutcome:
-        router_task = asyncio.create_task(self._router.route(event))
-        guardian_task = asyncio.create_task(self._guardian.review_turn(event))
-        route, guardian = await asyncio.gather(router_task, guardian_task)
+        async with asyncio.TaskGroup() as tg:
+            router_task = tg.create_task(self._router.route(event))
+            guardian_task = tg.create_task(self._guardian.review_turn(event))
+        route = router_task.result()
+        guardian = guardian_task.result()
         if guardian.decision is GuardianDecisionType.BLOCK:
             return TurnOutcome(route, guardian, None, None)
-        if route.route_type is RouteType.PASSIVE_TRANSLATION:
+        # Privacy-risk and passive-translation routes do not invoke Companion.
+        _NO_COMPANION_ROUTES = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
+        if route.route_type in _NO_COMPANION_ROUTES:
             return TurnOutcome(route, guardian, None, None)
 
         proposal = await self._companion.propose_cards(

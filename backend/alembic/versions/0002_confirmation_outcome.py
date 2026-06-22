@@ -23,11 +23,11 @@ def upgrade() -> None:
     )
     op.add_column("confirmations", sa.Column("state", sa.String(length=40), nullable=True))
     op.add_column("confirmations", sa.Column("idempotency_key", sa.Uuid(), nullable=True))
-    op.add_column("confirmations", sa.Column("terminal_result", sa.JSON(), nullable=True))
+    op.add_column("confirmations", sa.Column("terminal_outcome", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("confirmations", "terminal_result")
+    op.drop_column("confirmations", "terminal_outcome")
     op.drop_column("confirmations", "idempotency_key")
     op.drop_column("confirmations", "state")
     op.drop_column("confirmations", "guardian_decision_id")
