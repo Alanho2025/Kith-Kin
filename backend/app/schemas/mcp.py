@@ -82,6 +82,17 @@ class MemorySearchData(BaseModel):
     records: tuple[MemoryRecord, ...]
 
 
+class MemoryWriteData(BaseModel):
+    """Data returned after an idempotent confirmed memory write."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    memory_record_id: str
+    key: str
+    tags: tuple[str, ...]
+    replayed: bool
+
+
 class VisitSummaryValue(BaseModel):
     """Only structured visit facts accepted by `memory_write`."""
 
@@ -146,3 +157,14 @@ class NotifyFamilyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     summary: VisitSummaryValue
+
+
+class NotifyFamilyData(BaseModel):
+    """Provider-independent result for the notification stub."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    notification_id: str
+    delivered: bool
+    provider: str
+    replayed: bool
