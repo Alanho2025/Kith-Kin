@@ -1,0 +1,125 @@
+import type {
+  CardSetView,
+  ConfirmationView,
+  ConversationRuntimeEvent,
+  ConversationState,
+  GuardianWarningView,
+  SafeRuntimeMessageView,
+  TranslationSegmentView,
+  VisitSummaryView,
+} from "./viewModels";
+
+
+export const initialConversationState: ConversationState = {
+  status: "idle",
+  partialEnglish: "",
+  chineseSegments: [],
+  activeCardSet: null,
+  confirmation: null,
+  guardianWarning: null,
+  visibleError: null,
+  summary: null,
+  seenEventIds: new Set<string>(),
+};
+
+export type ConversationAction =
+  | ConversationRuntimeEvent
+  | { type: "dismiss_confirmation" };
+
+function recordEvent(
+  state: ConversationState,
+  event: ConversationRuntimeEvent,
+  changes: Partial<ConversationState>,
+): ConversationState {
+  const seenEventIds = new Set(state.seenEventIds);
+  seenEventIds.add(event.eventId);
+  return { ...state, ...changes, seenEventIds };
+}
+
+export function conversationReducer(
+  state: ConversationState,
+  event: ConversationAction,
+): ConversationState {
+  if ("type" in event) {
+    return { ...state, status: "listening", confirmation: null };
+  }
+  if (state.seenEventIds.has(event.eventId)) {
+    return state;
+  }
+
+  switch (event.eventType) {
+    case "session.ready":
+      return recordEvent(state, event, { status: "idle", visibleError: null });
+    case "audio.listening": {
+      const payload = event.payload as { active: boolean };
+      return recordEvent(state, event, { status: payload.active ? "listening" : "idle" });
+    }
+    case "transcript.partial":
+    case "transcript.final": {
+      const payload = event.payload as { text: string };
+      return recordEvent(state, event, {
+        status: event.eventType === "transcript.partial" ? "transcribing" : "translating",
+        partialEnglish: payload.text,
+      });
+    }
+    case "translation.pending":
+      return recordEvent(state, event, { status: "translating" });
+    case "translation.final": {
+      const payload = event.payload as TranslationSegmentView;
+      const exists = state.chineseSegments.some(
+        (segment) => segment.segmentId === payload.segmentId,
+      );
+      return recordEvent(state, event, {
+        status: "listening",
+        chineseSegments: exists ? state.chineseSegments : [...state.chineseSegments, payload],
+      });
+    }
+    case "route.decision":
+    case "tool.status":
+      return recordEvent(state, event, { status: "checking" });
+    case "cards.render": {
+      const payload = event.payload as { cardSet: CardSetView };
+      return recordEvent(state, event, { activeCardSet: payload.cardSet });
+    }
+    case "card.selected": {
+      const payload = event.payload as {
+        cardSetId: string;
+        cardId: string;
+        confirmationId: string;
+      };
+      const card = state.activeCardSet?.cards.find(
+        (candidate) => candidate.cardId === payload.cardId,
+      );
+      const confirmation: ConfirmationView | null = card
+        ? {
+            confirmationId: payload.confirmationId,
+            cardSetId: payload.cardSetId,
+            card,
+          }
+        : null;
+      return recordEvent(state, event, { status: "needs_confirmation", confirmation });
+    }
+    case "card.confirmed":
+    case "audio.speaking":
+      return recordEvent(state, event, { status: "speaking", confirmation: null });
+    case "guardian.warning":
+      return recordEvent(state, event, {
+        status: "blocked",
+        guardianWarning: event.payload as GuardianWarningView,
+      });
+    case "fallback.show":
+    case "error.show":
+      return recordEvent(state, event, {
+        status: "error",
+        visibleError: event.payload as SafeRuntimeMessageView,
+      });
+    case "summary.render": {
+      const payload = event.payload as { summary: VisitSummaryView };
+      return recordEvent(state, event, { summary: payload.summary });
+    }
+    case "session.ended":
+      return recordEvent(state, event, { status: "ended" });
+    default:
+      return recordEvent(state, event, {});
+  }
+}

@@ -1,5 +1,7 @@
 # Phase 03: Elderly UI on Mock Runtime Implementation Plan
 
+Status: implemented; automated checkpoint green, final responsive browser sign-off pending
+
 > Execute with strict TDD, frontend-app-builder design approval, and browser snapshot verification.
 
 ## Goal
@@ -163,3 +165,13 @@ it("selection only opens confirmation", async () => {
 ## Checkpoint Output and Stop Line
 
 Run `npm --prefix frontend run lint`, `typecheck`, `test`, and `build`, then browser-check widths 360px and 1280px. Expected output is zero lint/type errors, all test files passing, and a Vite bundle with no privileged environment names. Do not enter Phase 04 if any critical control lacks a label, selection sends confirmation, translated segments mutate, or browser verification requires typed text.
+
+## Implementation Record
+
+- Added the full page/component/runtime/hook/reducer manifest with a typed `ConversationRuntime` boundary and mock adapter.
+- Added focused RTL coverage for all seven ledger behaviours plus explicit cancellation and visit-summary confirmation coverage.
+- Generated and retained responsive conversation and safety/confirmation/summary concepts under `docs/design/`.
+- Frontend tests, lint, typecheck, and build are green.
+- Playwright verified one-tap start, event-driven desktop conversation, named controls, card selection, and confirmation-sheet rendering without typed input.
+- Browser testing found synchronous mock acknowledgement and confirmation-cancel defects; both received regression tests and fixes.
+- Final post-fix 360px/1280px screenshots remain blocked by the browser tool usage limit. See `docs/PHASE_03_BROWSER_QA.md`; this plan is not marked fully accepted.

@@ -26,7 +26,7 @@ The visual track depends on extracting `input_transcription` from the Live API *
 - **Gemini Flash** - lightweight text-to-text translation bypass for faithful English-to-Chinese visual captions.
 - **Google ADK** - multi-agent orchestration for Router, Companion, and Guardian agents.
 - **MCP** - tool layer through ADK `McpToolset`, with stdio transport preferred for the MVP.
-- **PostgreSQL** - persistent memory, user profile, medication records, visit summaries, trace metadata, and eval trace storage.
+- **SQLite** - persistent memory, user profile, medication records, visit summaries, trace metadata, and database schema storage (via aiosqlite).
 - **SQLAlchemy or SQLModel + Alembic** - database access, repository layer, and schema migrations.
 - **React + TypeScript** - frontend application and elderly-friendly conversation UI.
 - **Tailwind CSS** - styling system for layout, spacing, typography, large tap targets, and responsive UI.
@@ -37,11 +37,11 @@ The visual track depends on extracting `input_transcription` from the Live API *
 
 ### Stack rules
 
-1. Do not use SQLite for the main memory store. Use PostgreSQL.
+1. Do not use PostgreSQL for the main memory store. Use SQLite.
 2. Do not use Vanilla HTML/JS for the production frontend. Use React, TypeScript, and Tailwind CSS.
 3. Do not use non-Gemini LLM providers unless the project owner explicitly changes this rule.
 4. Do not put API keys, service credentials, database URLs, or long-lived tokens in the frontend.
-5. Keep provider details behind adapters. FastAPI endpoints and React components must not call Gemini, MCP, or PostgreSQL directly.
+5. Keep provider details behind adapters. FastAPI endpoints and React components must not call Gemini, MCP, or SQLite directly.
 ---
 
 ## Architecture - Single Live API session + Audio-Visual split
@@ -237,14 +237,14 @@ kith-and-kin/
 │   └── AGENTS.md                          # this file
 ├── .env.example
 ├── README.md
-└── docker-compose.yml                     # local PostgreSQL and optional services
+└── docker-compose.yml                     # Docker configuration (services removed for local SQLite)
 ```
 
 ### Structure rules
 
 1. `docs/ARCHITECTURE.md`, `docs/UI_UX_PLAN.md`, `evals/EVAL_CASES.md`, and `docs/clean-code-rules.md` are required source documents.
 2. Backend endpoints stay thin. Business workflows live in services.
-3. Database access lives in repositories. Do not query PostgreSQL from endpoints, agents, or React code.
+3. Database access lives in repositories. Do not query SQLite from endpoints, agents, or React code.
 4. Gemini calls live behind adapters. Do not call Gemini directly from endpoints, repositories, or React components.
 5. React components render prepared UI. WebSocket, audio, and API lifecycle logic must live in hooks or API modules.
 6. Shared runtime event names and statuses must be centralized in constants.
@@ -260,14 +260,14 @@ cp backend/.env.example backend/.env
 
 # Required backend variables:
 # GEMINI_API_KEY=...
-# DATABASE_URL=postgresql+asyncpg://kk_user:kk_password@localhost:5432/kithkin
+# DATABASE_URL=sqlite+aiosqlite:///kithkin.db
 # ENVIRONMENT=development
 # LOG_LEVEL=info
 ```
 
 ```bash
-# 2. Start local PostgreSQL
-docker compose up -d postgres
+# 2. Database setup (not required to run Docker container for SQLite)
+# SQLite database file will be created automatically in backend folder.
 ```
 
 ```bash
@@ -338,7 +338,7 @@ python -m evals.run evals/cases.json
 4. Connect the single Gemini Live API session from `docs/ARCHITECTURE.md`.
 5. Add the translation sidecar.
 6. Add Router, Companion, and Guardian.
-7. Add MCP tools with PostgreSQL-backed memory.
+7. Add MCP tools with SQLite-backed memory.
 8. Add response card confirmation.
 9. Add Guardian privacy and medical safety gates.
 10. Run `evals/EVAL_CASES.md` cases and capture traces.
@@ -365,7 +365,7 @@ The goal is low change cost. Prefer clear, testable, safe code over clever code.
 - Keep FastAPI endpoints thin.
 - Endpoint handlers may accept request schemas, receive dependencies, call one service method, map results, and return response schemas.
 - Services own business workflows.
-- Repositories own PostgreSQL queries and persistence.
+- Repositories own SQLite queries and persistence.
 - Adapters own Gemini, Live API, MCP, notification, and other external provider details.
 - Pydantic request schemas validate external input.
 - Pydantic response schemas expose only safe public fields.
@@ -375,15 +375,15 @@ The goal is low change cost. Prefer clear, testable, safe code over clever code.
 
 ### 2. Async and runtime behaviour
 
-- Use `asyncio` for WebSocket, Gemini calls, MCP calls, PostgreSQL I/O, and notification adapters when supported.
+- Use `asyncio` for WebSocket, Gemini calls, MCP calls, SQLite I/O, and notification adapters when supported.
 - Do not hide blocking I/O inside async endpoints.
 - Long-running tool calls must expose status events such as `checking` or `fallback`.
 - Fire-and-forget tasks must have clear ownership, logging, error handling, and cancellation behaviour.
 - TTS playback must trigger mic mute through explicit runtime state.
 
-### 3. PostgreSQL and data access
+### 3. SQLite and data access
 
-- PostgreSQL is the source of truth for memory, medication records, visit summaries, trace events, and seeded demo data.
+- SQLite is the source of truth for memory, medication records, visit summaries, trace events, and seeded demo data.
 - Use migrations for schema changes.
 - Do not create or modify tables manually without migration files.
 - Do not return ORM models directly from endpoints.
@@ -485,9 +485,9 @@ A change is done only when it is safe, testable, and aligned with the architectu
 - `mypy app` passes or documented exceptions are approved.
 - FastAPI endpoints remain thin.
 - Services do not import FastAPI request or response objects.
-- Repositories own PostgreSQL queries.
+- Repositories own SQLite queries.
 - Database schema changes include Alembic migrations.
-- PostgreSQL-backed features run against local test or demo data.
+- SQLite-backed features run against local test or demo data.
 - Gemini and MCP calls go through adapters.
 
 ### Frontend validation
@@ -574,7 +574,7 @@ Document the gap in the pull request or commit note and explain:
 8. **Frontend must never hold secrets.**
    React code must not contain Gemini API keys, database credentials, MCP credentials, long-lived tokens, hidden prompts, or provider secrets. Use backend-issued short-lived tokens only when needed.
 
-9. **PostgreSQL access goes through repositories.**
+9. **SQLite access goes through repositories.**
    Do not query the database from React, FastAPI endpoints, ADK agents, Pydantic validators, or UI mappers.
 
 10. **Gemini access goes through adapters.**

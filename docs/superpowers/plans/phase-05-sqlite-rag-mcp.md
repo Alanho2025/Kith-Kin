@@ -1,6 +1,6 @@
-# Phase 05: PostgreSQL RAG and MCP Implementation Plan
+# Phase 05: SQLite RAG and MCP Implementation Plan
 
-> PostgreSQL integration tests precede every model, migration, repository, and tool implementation.
+> SQLite integration tests precede every model, migration, repository, and tool implementation.
 
 ## Goal
 
@@ -8,7 +8,7 @@ Persist authorised profiles, sessions, confirmations, visits, notifications, and
 
 ## Non-Goals
 
-No SQLite, pgvector, clinical integration, real notification, or frontend database access.
+No PostgreSQL, pgvector, clinical integration, real notification, or frontend database access.
 
 ## Source of Truth
 
@@ -20,21 +20,21 @@ Trusted context, session/ticket ports, domain DTOs.
 
 ## Entry Conditions
 
-PostgreSQL dev/test containers healthy; Phase 04 green.
+SQLite database file and test file paths configured; Phase 04 green.
 
 ## Exit Checkpoint
 
-Migrations round-trip and repository/MCP/RAG integration suites pass against PostgreSQL.
+Migrations round-trip and repository/MCP/RAG integration suites pass against SQLite.
 
 ## Files
 
 ### Create
 
-SQLAlchemy base/session/models; Alembic config/migrations; repositories; RAG service; MCP server/adapter; seed script; PostgreSQL fixtures and tests.
+SQLAlchemy base/session/models; Alembic config/migrations; repositories; RAG service; MCP server/adapter; seed script; SQLite fixtures and tests.
 
 ### Modify
 
-Docker Compose, dependencies, session/ticket store wiring.
+Dependencies, settings dependency wiring, and session/ticket store wiring.
 
 ### Test
 
@@ -72,7 +72,7 @@ Run migration upgrade→downgrade→upgrade, focused integration tests, then ful
 
 ## Stop Conditions
 
-Any SQLite usage, model-controlled identity, raw profile trace, nondeterministic truncation, or non-idempotent write blocks Phase 06.
+Any PostgreSQL usage, model-controlled identity, raw profile trace, nondeterministic truncation, or non-idempotent write blocks Phase 06.
 
 ## Commit Boundaries
 
@@ -82,7 +82,7 @@ Any SQLite usage, model-controlled identity, raw profile trace, nondeterministic
 
 ## Next Artifacts
 
-PostgreSQL repositories, bounded RAG, MCP adapter/server, demo seed, and persistent audit primitives.
+SQLite repositories, bounded RAG, MCP adapter/server, demo seed, and persistent audit primitives.
 
 ## Exact File and Migration Manifest
 
@@ -91,9 +91,9 @@ PostgreSQL repositories, bounded RAG, MCP adapter/server, demo seed, and persist
 - Create services/adapters: `rag_service.py`, `mcp_tool_adapter.py`, `backend/app/mcp_servers/memory_server.py`.
 - Create Alembic: `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/0001_initial_schema.py`.
 - Create seed: `scripts/seed_demo_data.py`; tests and fixtures under `backend/tests/integration/db`, `rag`, and `mcp`.
-- Modify `docker-compose.yml`, settings dependency wiring, and Phase 04 stores to PostgreSQL implementations.
+- Modify settings dependency wiring and Phase 04 stores to SQLite implementations.
 
-Migration `0001` creates UUID-primary-key tables with UTC timestamps, foreign keys scoped by `user_id`, unique `(issuer, jti)`, unique idempotency keys, JSONB only for validated structured values, and indexes on `(user_id, updated_at)` and `(session_id, sequence)`. It does not create SQLite files, vector extensions, or raw transcript/audio columns.
+Migration `0001` creates UUID-primary-key tables with UTC timestamps, foreign keys scoped by `user_id`, unique `(issuer, jti)`, unique idempotency keys, and indexes on `(user_id, updated_at)` and `(session_id, sequence)`. It does not create PostgreSQL tables, vector extensions, or raw transcript/audio columns.
 
 ## Exact Public Signatures
 
@@ -155,12 +155,11 @@ async def test_user_scope_cannot_cross_context(memory_repository, user_a_context
     assert user_b_record.record_id not in {item.record_id for item in result}
 ```
 
-Run PostgreSQL tests with `TEST_DATABASE_URL` from `backend/.env.example`; no test may substitute SQLite. Verify RED with the exact node ID, GREEN with the integration directory, then full pytest/ruff/mypy. Allowed refactors are query builders and unit-of-work extraction without changing transaction ownership.
+Run SQLite tests with `TEST_DATABASE_URL` from `backend/.env.example`. Verify RED with the exact node ID, GREEN with the integration directory, then full pytest/ruff/mypy. Allowed refactors are query builders and unit-of-work extraction without changing transaction ownership.
 
 ## Migration, Seed, Cleanup, and Rollback Commands
 
 ```bash
-docker compose up -d postgres_test
 backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
 backend/.venv/bin/alembic -c backend/alembic.ini downgrade base
 backend/.venv/bin/alembic -c backend/alembic.ini upgrade head
@@ -168,4 +167,4 @@ backend/.venv/bin/python scripts/seed_demo_data.py --database-url "$TEST_DATABAS
 backend/.venv/bin/python scripts/seed_demo_data.py --database-url "$TEST_DATABASE_URL" --cleanup
 ```
 
-Expected output is one applied revision, clean downgrade, identical reseed counts, and zero real identifiers. Any destructive command must target the `_test` database and print the selected database name before mutation. Failure at any migration step blocks Phase 06.
+Expected output is one applied revision, clean downgrade, identical reseed counts, and zero real identifiers. Any destructive command must target the test database. Failure at any migration step blocks Phase 06.

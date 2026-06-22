@@ -23,3 +23,27 @@ class RetrievalLimitError(KithKinError):
     """Raised when retrieval limits are invalid."""
 
     code = "RETRIEVAL_LIMIT_INVALID"
+
+
+class SessionNotConnectableError(KithKinError):
+    """Raised when a missing or ended session cannot accept a ticket/socket."""
+
+    code = "SESSION_NOT_CONNECTABLE"
+
+
+class TicketInvalidError(KithKinError):
+    """Raised for missing, malformed, expired, or invalid-signature tickets."""
+
+    code = "TICKET_INVALID"
+
+
+class TicketScopeError(KithKinError):
+    """Raised when a validly signed ticket is outside its bound scope."""
+
+    code = "TICKET_SCOPE_INVALID"
+
+
+class TicketReplayError(KithKinError):
+    """Raised when a single-use ticket JTI has already been consumed."""
+
+    code = "TICKET_REPLAYED"
