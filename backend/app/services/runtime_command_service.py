@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.core.constants import CardActionType
-from app.domain.confirmation import CardConfirmationError, CardSelectCommand
+from app.domain.confirmation import CardSelectCommand
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import (
     CardCancelEvent,
@@ -63,21 +63,12 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, CardConfirmEvent):
-            payload: dict[str, object]
-            try:
-                outcome = await self._cards.confirm_selected(event.payload.confirmation_id, context)
-                payload = {
-                    "confirmation_id": outcome.confirmation_id,
-                    "action_type": outcome.action_type.value,
-                    "replayed": outcome.replayed,
-                }
-            except CardConfirmationError:
-                legacy = self._cards.confirm(event.payload.confirmation_id)
-                payload = {
-                    "confirmation_id": legacy.confirmation_id,
-                    "action_type": CardActionType.SPEAK.value,
-                    "replayed": legacy.replayed,
-                }
+            outcome = await self._cards.confirm_selected(event.payload.confirmation_id, context)
+            payload: dict[str, object] = {
+                "confirmation_id": outcome.confirmation_id,
+                "action_type": outcome.action_type.value,
+                "replayed": outcome.replayed,
+            }
             return (RuntimeCommandEvent("card.confirmed", payload, event.event_id),)
         if isinstance(event, CardCancelEvent):
             await self._cards.cancel(event.payload.confirmation_id, context)
@@ -94,6 +85,7 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, SelfSpeakEvent):
+            await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
                     "audio.listening",
