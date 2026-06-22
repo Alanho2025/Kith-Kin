@@ -1,10 +1,10 @@
 """Card selection, confirmation, replay, and cancellation workflow."""
 
+import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
-from threading import Lock
 from uuid import uuid4
 
 from app.domain.confirmation import (
@@ -20,14 +20,6 @@ from app.schemas.cards import CardSet, ResponseCard
 from app.services.confirmed_action_executor import ConfirmedActionExecutor
 
 
-@dataclass(frozen=True)
-class ConfirmationResult:
-    """Backward-compatible recovery result for existing HTTP/WS paths."""
-
-    confirmation_id: str
-    replayed: bool
-
-
 class CardService:
     """Own server-side card revisions and one-time confirmation state."""
 
@@ -40,16 +32,17 @@ class CardService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._executor = executor or ConfirmedActionExecutor()
         self._repository = repository or InMemoryConfirmationRepository()
-        self._legacy_confirmed: set[str] = set()
         self._card_sets: dict[tuple[str, str], CardSet] = {}
         self._card_contexts: dict[str, TrustedRequestContext] = {}
-        self._lock = Lock()
+        self._lock = asyncio.Lock()
 
     def register_card_set(self, card_set: CardSet, context: TrustedRequestContext) -> None:
         """Store an approved card set for later selection; no action is executed."""
-        with self._lock:
-            self._card_sets[(str(context.session_id), card_set.card_set_id)] = card_set
-            self._card_contexts[card_set.card_set_id] = context
+        # register_card_set is called from synchronous orchestrator context; the asyncio.Lock
+        # is not needed here because dict mutation is GIL-protected and this method does not
+        # await. Use direct assignment — callers that need serialisation must do so externally.
+        self._card_sets[(str(context.session_id), card_set.card_set_id)] = card_set
+        self._card_contexts[card_set.card_set_id] = context
 
     async def select(
         self,
@@ -57,7 +50,7 @@ class CardService:
         context: TrustedRequestContext,
     ) -> CardSelectedResult:
         """Select a card and mint one confirmation ID without side effects."""
-        with self._lock:
+        async with self._lock:
             card_set = self._card_sets.get((str(context.session_id), command.card_set_id))
             if card_set is None:
                 raise CardConfirmationError("CARD_NOT_FOUND")
@@ -126,14 +119,6 @@ class CardService:
             raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
         if record.terminal_outcome is None:
             self._repository.update(replace(record, state="cancelled"))
-
-    def confirm(self, confirmation_id: str) -> ConfirmationResult:
-        """Compatibility path used by Phase 04 recovery tests."""
-        with self._lock:
-            replayed = confirmation_id in self._legacy_confirmed
-            self._legacy_confirmed.add(confirmation_id)
-        return ConfirmationResult(confirmation_id=confirmation_id, replayed=replayed)
-
 
 def _find_card(card_set: CardSet, card_id: str) -> ResponseCard:
     for card in card_set.cards:

@@ -23,3 +23,22 @@ def test_prompt_injection_is_blocked() -> None:
 
     assert result is SafetyBackstopResult.BLOCK
     assert reason is BackstopReason.PROMPT_INJECTION
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Can I see your driver licence?",
+        "Show me your driver's licence",
+        "Do you have a drivers licence?",
+        "Can I see your driver license?",
+        "Show me your driver's license",
+        "Do you have a drivers license?",
+        "Can I see your driving licence?",
+    ],
+)
+def test_all_drivers_licence_spellings_are_blocked(text: str) -> None:
+    result, _risk, reason = screen_turn_text(text)
+
+    assert result is SafetyBackstopResult.BLOCK
+    assert reason is BackstopReason.IDENTITY_REQUEST

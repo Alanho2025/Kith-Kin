@@ -1,5 +1,15 @@
 """Companion card proposal boundary."""
 
+# TODO(Phase 09 – ADK integration): Replace the deterministic stub below with a
+# real ADK LlmAgent call.  The integration point is ``CompanionAgent.propose_cards``
+# which should:
+#   1. Build an ADK ``Session`` with ``McpToolAdapter.companion_tool_names()`` tools.
+#   2. Submit the transcript text and ``RetrievalContext`` as the user turn.
+#   3. Parse the ``submit_response_cards`` tool-call result into ``CardSetProposal``.
+#   4. Propagate ``COMPANION_UNAVAILABLE`` / ``COMPANION_OUTPUT_INVALID`` on failure.
+# The ``_card_for`` helper and ``_has_fuzzy_drug`` are stub implementations only
+# and must be deleted when the real model integration lands.
+
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from hashlib import sha256
