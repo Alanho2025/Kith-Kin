@@ -1,6 +1,6 @@
 # Phase 04: Session Ticket and Fake WebSocket Runtime Implementation Plan
 
-Status: implemented; integration checkpoint green, acceptance pending Phase 03 browser sign-off
+Status: implemented and accepted
 
 > Execute each ticket and socket behaviour with an observed failing integration test first.
 
@@ -177,4 +177,4 @@ Expected checkpoint: all abuse cases return the fixed code, valid connection emi
 - Added a frontend `BackendConversationRuntime` that requests the HttpOnly app ticket and maps backend snake_case events without exposing a credential.
 - API/WebSocket integration coverage includes 17 cases for cookie policy, invalid/scope/replay/inactive close codes, ordering, binary flow, bounded reconnect replay/fallback, and recovery confirmation.
 - No migration, database, Gemini call, MCP process, real TTS, or caller-supplied user identity was added.
-- Automated backend/frontend and secret-scan checkpoints are green; final acceptance is withheld until the Phase 03 responsive browser gate is rerun.
+- Automated backend/frontend and secret-scan checkpoints are green. Phase 03 responsive browser acceptance passed, so the dependent Phase 04 acceptance gate is released.
