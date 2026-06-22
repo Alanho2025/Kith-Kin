@@ -1,5 +1,6 @@
 """Environment-backed application configuration with fail-closed validation."""
 
+from datetime import timedelta
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -75,3 +76,7 @@ class Settings(BaseSettings):
             if not self.app_ws_cookie_secure:
                 raise ValueError("CONFIG_INSECURE_COOKIE")
         return self
+
+    @property
+    def app_ws_token_ttl_seconds_delta(self) -> timedelta:
+        return timedelta(seconds=self.app_ws_token_ttl_seconds)

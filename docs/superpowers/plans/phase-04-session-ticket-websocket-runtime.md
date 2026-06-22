@@ -1,5 +1,7 @@
 # Phase 04: Session Ticket and Fake WebSocket Runtime Implementation Plan
 
+Status: implemented; integration checkpoint green, acceptance pending Phase 03 browser sign-off
+
 > Execute each ticket and socket behaviour with an observed failing integration test first.
 
 ## Goal
@@ -166,3 +168,13 @@ Verify each RED with `backend/.venv/bin/pytest <file>::<test> -v`; the named ass
 ## Checkpoint and Rollback
 
 Expected checkpoint: all abuse cases return the fixed code, valid connection emits `session.ready`, and `scripts/check_no_secrets.py` passes against the bundle. Rollback removes the Phase 04 app/service/adapter files; it does not change specs or Phase 02 types. A socket accepted before validation, reusable JTI, or caller-provided identity is an immediate stop condition.
+
+## Implementation Record
+
+- Added FastAPI app composition, health/session/ticket/card/live routes, stable error mapping, and server-resolved synthetic development identity.
+- Added JWT issuer/verifier with exact claims, injected clock, manual scope checks, and atomic in-memory JTI consumption before `accept()`.
+- Added fake binary audio echo, deterministic `session.ready`/`audio.listening`, bounded session event history, replay after `last_seen_sequence`, visible stale-resume fallback, and shared HTTP/WS `CardService` idempotency.
+- Added a frontend `BackendConversationRuntime` that requests the HttpOnly app ticket and maps backend snake_case events without exposing a credential.
+- API/WebSocket integration coverage includes 17 cases for cookie policy, invalid/scope/replay/inactive close codes, ordering, binary flow, bounded reconnect replay/fallback, and recovery confirmation.
+- No migration, database, Gemini call, MCP process, real TTS, or caller-supplied user identity was added.
+- Automated backend/frontend and secret-scan checkpoints are green; final acceptance is withheld until the Phase 03 responsive browser gate is rerun.
