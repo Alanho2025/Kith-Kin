@@ -1,0 +1,125 @@
+import asyncio
+from datetime import UTC, datetime
+from uuid import UUID
+
+from app.adapters.fake_live_adapter import FakeLiveAdapter
+from app.adapters.provider_schemas import (
+    ProviderLiveEventType,
+    ProviderTranscriptEvent,
+    TranslationRequest,
+    TranslationSegment,
+)
+from app.services.card_service import CardService
+from app.services.live_runtime_service import LiveRuntimeService
+from app.services.task_supervisor import TaskSupervisor
+from app.services.translation_service import TranslationService
+
+NOW = datetime(2026, 6, 22, tzinfo=UTC)
+SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
+
+
+class CapturingTranslationGateway:
+    def __init__(self, *, delay_seconds: float = 0) -> None:
+        self.requests: list[TranslationRequest] = []
+        self.delay_seconds = delay_seconds
+
+    async def translate_final(self, request: TranslationRequest) -> TranslationSegment:
+        self.requests.append(request)
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
+        return TranslationSegment(
+            source_transcript_event_id=request.source_event_id,
+            segment_id=f"seg_{request.utterance_id}",
+            source_language=request.source_language,
+            target_language="zh_cn",
+            translated_text="\u4f60\u5bf9\u6297\u751f\u7d20\u8fc7\u654f\u5417\uff1f",
+            latency_ms=10,
+        )
+
+
+def runtime(gateway: CapturingTranslationGateway, *, timeout_ms: int = 1000) -> LiveRuntimeService:
+    return LiveRuntimeService(
+        CardService(),
+        FakeLiveAdapter(),
+        lambda: NOW,
+        TranslationService(gateway, timeout_ms=timeout_ms),
+    )
+
+
+def provider_transcript(*, final: bool, utterance_id: str = "utt_1") -> ProviderTranscriptEvent:
+    return ProviderTranscriptEvent(
+        event_type=(
+            ProviderLiveEventType.TRANSCRIPT_FINAL
+            if final
+            else ProviderLiveEventType.TRANSCRIPT_PARTIAL
+        ),
+        provider_event_id="provider_evt_1",
+        utterance_id=utterance_id,
+        speaker="pharmacist",
+        language="en",
+        text="Do you have any allergies to antibiotics?",
+        revision=2 if final else 1,
+    )
+
+
+async def test_partial_never_calls_translation() -> None:
+    gateway = CapturingTranslationGateway()
+
+    events = await runtime(gateway).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=False),
+    )
+
+    assert gateway.requests == []
+    assert events[-1]["event_type"] == "transcript.partial"
+
+
+async def test_final_appends_one_faithful_segment() -> None:
+    gateway = CapturingTranslationGateway()
+
+    events = await runtime(gateway).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=True),
+    )
+
+    assert [event["event_type"] for event in events] == [
+        "transcript.final",
+        "translation.pending",
+        "translation.final",
+    ]
+    assert events[-1]["payload"]["append_only"] is True
+    assert events[-1]["payload"]["mode"] == "faithful"
+
+
+async def test_duplicate_final_is_idempotent() -> None:
+    gateway = CapturingTranslationGateway()
+    service = runtime(gateway)
+
+    first = await service.handle_provider_event(SESSION_ID, provider_transcript(final=True))
+    second = await service.handle_provider_event(SESSION_ID, provider_transcript(final=True))
+
+    assert sum(1 for event in first if event["event_type"] == "translation.final") == 1
+    assert all(event["event_type"] != "translation.final" for event in second)
+    assert len(gateway.requests) == 1
+
+
+async def test_translation_timeout_keeps_english() -> None:
+    gateway = CapturingTranslationGateway(delay_seconds=0.05)
+
+    events = await runtime(gateway, timeout_ms=1).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=True),
+    )
+
+    assert events[0]["event_type"] == "transcript.final"
+    assert events[-1]["event_type"] == "fallback.show"
+    assert events[-1]["payload"]["code"] == "TRANSLATION_TIMEOUT"
+
+
+async def test_disconnect_cancels_all_owned_tasks() -> None:
+    supervisor = TaskSupervisor()
+    supervisor.create(asyncio.sleep(60))
+
+    await supervisor.cancel_all()
+
+    assert supervisor.pending_count == 0

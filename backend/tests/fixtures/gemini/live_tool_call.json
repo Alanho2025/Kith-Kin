@@ -1,0 +1,9 @@
+{
+  "event_id": "provider_evt_tool_1",
+  "type": "tool_call",
+  "name": "memory_search",
+  "arguments": {
+    "query": "profile",
+    "tags": ["medications"]
+  }
+}

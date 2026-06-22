@@ -25,6 +25,18 @@ class RetrievalLimitError(KithKinError):
     code = "RETRIEVAL_LIMIT_INVALID"
 
 
+class IdempotencyConflictError(KithKinError):
+    """Raised when a repeated idempotency key has different data."""
+
+    code = "IDEMPOTENCY_CONFLICT"
+
+
+class ToolPermissionError(KithKinError):
+    """Raised when a tool is requested outside its permission tier."""
+
+    code = "TOOL_PERMISSION_DENIED"
+
+
 class SessionNotConnectableError(KithKinError):
     """Raised when a missing or ended session cannot accept a ticket/socket."""
 
@@ -47,3 +59,9 @@ class TicketReplayError(KithKinError):
     """Raised when a single-use ticket JTI has already been consumed."""
 
     code = "TICKET_REPLAYED"
+
+
+class ProviderUnavailableError(KithKinError):
+    """Raised when a provider boundary cannot produce a safe result."""
+
+    code = "PROVIDER_UNAVAILABLE"
