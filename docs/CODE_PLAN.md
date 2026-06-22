@@ -146,9 +146,11 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 - Phase 04: implemented with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter; acceptance remains dependent on the Phase 03 browser gate.
 - Phase 05: implemented with SQLite schema/migration, scoped repositories, atomic ticket JTI consumption, bounded RAG, canonical MCP tool manifest/adapter, demo seed/cleanup, and redacted trace primitives.
 - Phase 06: fixture-backed implementation complete with provider-normalised Gemini Live events, faithful final-turn text translation sidecar, append-only translation runtime events, deduplication, timeout fallback, and task cleanup. Credential-backed real smoke is `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied.
-- Phases 07–11 and 90: planned, not started. Phase 07 can build on the Phase 05 read-only MCP filter and Phase 06 provider fixtures without changing the backend-proxy topology.
+- Phase 07: implemented with concurrent Router/Guardian orchestration for each final turn, deterministic Guardian backstop screening, read-only Companion tooling, structured agent outputs, and Guardian review of proposed cards.
+- Phase 08: implemented with server-side card selection, one-time confirmations, idempotent replay, cancellation, runtime command handling, and half-duplex audio mute/speak/listen ordering.
+- Phases 09-11 and 90: planned, not started.
 
-## Phase 00–02 Verification Record
+## Phase 00-02 Verification Record
 
 Recorded 2026-06-22:
 
@@ -170,7 +172,7 @@ Recorded 2026-06-22:
 
 The credential-backed probe proves that the Python/FastAPI backend topology is viable; it is not the Phase 06 production adapter. The eval runner, SQLite migrations, FastAPI runtime, ADK agents, and live provider adapters belong to later phases and are not claimed by this checkpoint.
 
-## Phase 03–04 Verification Record
+## Phase 03-04 Verification Record
 
 Recorded 2026-06-22:
 
@@ -185,7 +187,7 @@ Recorded 2026-06-22:
 
 Phase 03 browser details and the remaining sign-off work are recorded in `docs/PHASE_03_BROWSER_QA.md`.
 
-## Phase 05–06 Verification Record
+## Phase 05-06 Verification Record
 
 Recorded 2026-06-22:
 
@@ -199,3 +201,19 @@ Recorded 2026-06-22:
 | Real Gemini Live/translation smoke | `blocked_missing_credentials`; `GOOGLE_API_KEY` not present |
 
 The Phase 06 production SDK session remains behind the `GeminiLiveAdapter` boundary and is not claimed without credentials. The public backend WebSocket shape remains unchanged.
+
+## Phase 07-08 Verification Record
+
+Recorded 2026-06-22:
+
+| Check | Result |
+|---|---|
+| Full backend pytest | 119 passed |
+| Ruff | all checks passed |
+| Mypy | 81 source files, no issues |
+| Router/Guardian concurrency | covered by integration test |
+| Guardian block and card review | covered by deterministic unit/integration tests |
+| Card selection and confirmation | select has zero side effects; confirm executes once; duplicate confirm replays stored outcome |
+| Half-duplex audio | mute/speaking/frame/completed/unmute/listening ordering covered; TTS failure restores listening |
+
+The Phase 07/08 implementation remains fixture-backed and deterministic. It does not claim real notification, real visit-summary writeback, or any external side effect before Phase 09.
