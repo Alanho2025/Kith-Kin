@@ -1,10 +1,10 @@
 # Kith&Kin
 
-Kith&Kin is a real-time Gemini companion for elderly Chinese-speaking parents navigating Australian pharmacy and GP visits. The MVP uses a React client, FastAPI backend proxy, one Gemini Live session, ADK agents, SQLite memory, and a stdio MCP tool server.
+Kith&Kin is a real-time Gemini companion for elderly Chinese-speaking parents navigating Australian pharmacy and GP visits. The MVP uses a React client, FastAPI backend proxy, one Gemini Live session, ADK-style agents, SQLite memory, and a stdio MCP tool server.
 
 ## Implemented scope
 
-Phases 00–06 now provide the normative contracts, credential-backed Live validation record, secure tooling foundation, typed runtime/MCP/card schemas, an accessible React mock conversation UI, single-use app WebSocket tickets, a fake FastAPI WebSocket runtime, SQLite-backed RAG/MCP tools, and fixture-backed Gemini Live plus faithful translation-sidecar adapters. The real Gemini smoke for Phase 06 is currently `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied. Phase 03 browser sign-off is partially complete and tracked in `docs/PHASE_03_BROWSER_QA.md`.
+Phases 00-08 now provide the normative contracts, credential-backed Live validation record, secure tooling foundation, typed runtime/MCP/card schemas, an accessible React mock conversation UI, single-use app WebSocket tickets, a fake FastAPI WebSocket runtime, SQLite-backed RAG/MCP tools, fixture-backed Gemini Live plus faithful translation-sidecar adapters, deterministic Router/Guardian/Companion orchestration, confirmation-gated response cards, idempotent replay, and half-duplex audio ordering. The real Gemini smoke for Phase 06 is currently `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied. Phase 03 browser sign-off is partially complete and tracked in `docs/PHASE_03_BROWSER_QA.md`.
 
 ## Setup
 
@@ -19,10 +19,11 @@ npm --prefix frontend ci
 
 `GOOGLE_API_KEY` is optional for tests and is required only for opt-in provider validation and later Live integration.
 
-## Verify Phases 00–02
+## Verify Phases 00-08
 
 ```bash
 backend/.venv/bin/pytest backend/tests/unit -v
+backend/.venv/bin/pytest backend/tests/integration -v
 backend/.venv/bin/ruff check backend
 backend/.venv/bin/mypy backend/app
 npm --prefix frontend run lint

@@ -1,0 +1,73 @@
+"""Companion card proposal boundary."""
+
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from hashlib import sha256
+from uuid import uuid4
+
+from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.core.constants import CardActionType, CardRiskLevel
+from app.schemas.agent_outputs import CardSetProposal, RouteDecision
+from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
+from app.schemas.runtime_events import TranscriptFinalEvent
+
+
+class CompanionAgent:
+    """Prepare safe response-card proposals using read-only tools only."""
+
+    def __init__(self, clock: Callable[[], datetime]) -> None:
+        self._clock = clock
+
+    @staticmethod
+    def tool_names() -> tuple[str, ...]:
+        """Expose only read-only MCP tools plus proposal submission."""
+        return (*McpToolAdapter.companion_tool_names(), "submit_response_cards")
+
+    async def propose_cards(
+        self,
+        event: TranscriptFinalEvent,
+        route: RouteDecision,
+        guardian_decision_id: str,
+    ) -> CardSetProposal:
+        card = self._card_for(event, guardian_decision_id)
+        now = self._clock()
+        card_set = CardSet(
+            card_set_id=f"cards_{uuid4()}",
+            revision=1,
+            source_event_id=event.event_id,
+            generated_at=now,
+            expires_at=now + timedelta(minutes=3),
+            cards=(card,),
+        )
+        digest = sha256(card_set.model_dump_json().encode("utf-8")).hexdigest()
+        return CardSetProposal(card_set=card_set, proposal_hash=digest)
+
+    def _card_for(self, event: TranscriptFinalEvent, guardian_decision_id: str) -> ResponseCard:
+        text = event.payload.text.lower()
+        if _has_fuzzy_drug(text):
+            return ResponseCard(
+                card_id=f"card_{uuid4()}",
+                card_type=CardType.ASK_TO_WRITE_DOWN,
+                zh_text="Please ask the pharmacist to write down the medicine name.",
+                en_text="Could you please write down the medicine name so I can confirm it?",
+                risk_level=CardRiskLevel.CAUTION,
+                action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
+                requires_parent_confirmation=True,
+                requires_guardian_approval=True,
+                guardian_decision_id=guardian_decision_id,
+            )
+        return ResponseCard(
+            card_id=f"card_{uuid4()}",
+            card_type=CardType.ASK_QUESTION,
+            zh_text="Please help me confirm whether this conflicts with my medicines.",
+            en_text="Could you check if this conflicts with my current medicines or allergies?",
+            risk_level=CardRiskLevel.MEDICAL,
+            action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
+            requires_parent_confirmation=True,
+            requires_guardian_approval=True,
+            guardian_decision_id=guardian_decision_id,
+        )
+
+
+def _has_fuzzy_drug(text: str) -> bool:
+    return any(marker in text for marker in ("sounds like", "maybe", "not sure", "listen to pro"))
