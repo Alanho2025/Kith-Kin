@@ -4,7 +4,7 @@ Kith&Kin is a real-time Gemini companion for elderly Chinese-speaking parents na
 
 ## Implemented scope
 
-Phases 00–02 provide the normative contracts, source reconciliation, Live transcription validation harness, secure environment/tooling foundation, typed runtime/MCP/card schemas, backend state machines, and frontend wire mapper. The authenticated Live provider checkpoint remains explicitly credential-blocked.
+Phases 00–04 now provide the normative contracts, credential-backed Live validation record, secure tooling foundation, typed runtime/MCP/card schemas, an accessible React mock conversation UI, single-use app WebSocket tickets, and a fake FastAPI WebSocket runtime. The Phase 00 text-translation latency gate remains failed. Phase 03 browser sign-off is partially complete and tracked in `docs/PHASE_03_BROWSER_QA.md`.
 
 ## Setup
 
