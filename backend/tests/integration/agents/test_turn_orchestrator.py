@@ -96,7 +96,7 @@ async def test_router_and_guardian_start_for_same_final() -> None:
     guardian.release.set()
     outcome = await task
 
-    assert outcome.guardian.decision is GuardianDecisionType.ALLOW
+    assert outcome.guardian.decision is GuardianDecisionType.REQUIRE_PARENT_CONFIRMATION
 
 
 async def test_guardian_block_skips_companion_cards() -> None:

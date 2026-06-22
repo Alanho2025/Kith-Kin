@@ -22,7 +22,7 @@ describe("ResponseCard", () => {
       ]);
     });
     expect(
-      screen.getByRole("dialog", { name: "确认让 KK 代您表达" }),
+      await screen.findByRole("dialog", { name: "确认让 KK 代您表达" }),
     ).toBeInTheDocument();
     expect(runtime.commands.some((command) => command.eventType === "card.confirm")).toBe(false);
   });

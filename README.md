@@ -4,7 +4,7 @@ Kith&Kin is a real-time Gemini companion for elderly Chinese-speaking parents na
 
 ## Implemented scope
 
-Phases 00-08 now provide the normative contracts, credential-backed Live validation record, secure tooling foundation, typed runtime/MCP/card schemas, an accessible React mock conversation UI, single-use app WebSocket tickets, a fake FastAPI WebSocket runtime, SQLite-backed RAG/MCP tools, fixture-backed Gemini Live plus faithful translation-sidecar adapters, deterministic Router/Guardian/Companion orchestration, confirmation-gated response cards, idempotent replay, and half-duplex audio ordering. The real Gemini smoke for Phase 06 is currently `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied. Phase 03 browser sign-off is partially complete and tracked in `docs/PHASE_03_BROWSER_QA.md`.
+Phases 00-08 now provide the normative contracts, credential-backed Live validation record, secure tooling foundation, typed runtime/MCP/card schemas, an accessible React mock conversation UI, single-use app WebSocket tickets, a fake FastAPI WebSocket runtime, SQLite-backed RAG/MCP tools, fixture-backed Gemini Live plus faithful translation-sidecar adapters, deterministic Router/Guardian/Companion orchestration, confirmation-gated response cards, idempotent replay, and integration-tested half-duplex audio ordering. The real Gemini smoke for Phase 06 is currently `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied. Phase 03 browser acceptance is complete and tracked in `docs/PHASE_03_BROWSER_QA.md`.
 
 ## Setup
 
