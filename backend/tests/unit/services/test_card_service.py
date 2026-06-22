@@ -18,6 +18,16 @@ def context() -> TrustedRequestContext:
     )
 
 
+def other_session_context() -> TrustedRequestContext:
+    from uuid import UUID
+
+    return TrustedRequestContext(
+        session_id=UUID("00000000-0000-4000-8000-000000000202"),
+        user_id=UUID("00000000-0000-4000-8000-000000000001"),
+        origin="test",
+    )
+
+
 async def test_select_has_zero_side_effects() -> None:
     clock = MutableClock()
     executor = ConfirmedActionExecutor()
@@ -83,3 +93,23 @@ async def test_stale_revision_is_rejected() -> None:
         )
 
     assert error.value.code == "CARD_REVISION_STALE"
+
+
+async def test_cross_session_confirm_is_rejected() -> None:
+    """A confirmation minted in session A cannot be consumed by session B."""
+    clock = MutableClock()
+    executor = ConfirmedActionExecutor()
+    service = CardService(clock.now, executor)
+    card_set = approved_card_set(clock)
+    session_a = context()
+    service.register_card_set(card_set, session_a)
+    selected = await service.select(
+        CardSelectCommand(card_set.card_set_id, card_set.cards[0].card_id, card_set.revision),
+        session_a,
+    )
+
+    with pytest.raises(CardConfirmationError) as error:
+        await service.confirm_selected(selected.confirmation_id, other_session_context())
+
+    assert error.value.code == "CONFIRMATION_SCOPE_INVALID"
+    assert executor.action_count == 0

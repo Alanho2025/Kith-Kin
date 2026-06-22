@@ -1,7 +1,6 @@
 """Gemini Live adapter normalising provider messages behind a stable port."""
 
 import base64
-from collections.abc import AsyncIterator
 from typing import Any, Literal, cast
 
 from app.adapters.provider_schemas import (
@@ -84,29 +83,6 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             code="LIVE_PROTOCOL_ERROR",
             retryable=False,
         )
-
-
-class FixtureLiveSession(LiveSessionPort):
-    """Contract fake for tests and fixture-driven probes."""
-
-    def __init__(self, events: tuple[ProviderLiveEvent, ...]) -> None:
-        self.sent_audio: list[bytes] = []
-        self.closed = False
-        self._events = events
-
-    async def send_audio(self, frame: bytes) -> None:
-        self.sent_audio.append(frame)
-
-    async def close(self) -> None:
-        self.closed = True
-
-    async def _event_iterator(self) -> AsyncIterator[ProviderLiveEvent]:
-        for event in self._events:
-            yield event
-
-    def events(self) -> AsyncIterator[ProviderLiveEvent]:
-        return self._event_iterator()
-
 
 def _speaker(value: object) -> Literal["parent", "pharmacist", "unknown"]:
     if value in {"parent", "pharmacist", "unknown"}:
