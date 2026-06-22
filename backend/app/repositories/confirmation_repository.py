@@ -1,6 +1,7 @@
 """In-memory confirmation repository used by the local runtime."""
 
 from threading import Lock
+from uuid import UUID
 
 from app.domain.confirmation import StoredConfirmation
 
@@ -23,3 +24,10 @@ class InMemoryConfirmationRepository:
     def update(self, record: StoredConfirmation) -> None:
         with self._lock:
             self._records[record.confirmation_id] = record
+
+    def find_pending_by_session(self, session_id: UUID) -> list[StoredConfirmation]:
+        with self._lock:
+            return [
+                record for record in self._records.values()
+                if record.session_id == session_id and record.state == "pending"
+            ]

@@ -120,6 +120,13 @@ class CardService:
         if record.terminal_outcome is None:
             self._repository.update(replace(record, state="cancelled"))
 
+    async def cancel_all_pending(self, context: TrustedRequestContext) -> None:
+        """Cancel all pending confirmations for the session."""
+        pending = self._repository.find_pending_by_session(context.session_id)
+        for record in pending:
+            if record.user_id == context.user_id:
+                self._repository.update(replace(record, state="cancelled"))
+
 def _find_card(card_set: CardSet, card_id: str) -> ResponseCard:
     for card in card_set.cards:
         if card.card_id == card_id:

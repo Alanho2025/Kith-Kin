@@ -85,6 +85,7 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, SelfSpeakEvent):
+            await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
                     "audio.listening",
