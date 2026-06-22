@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -9,15 +10,26 @@ from app.adapters.app_websocket_ticket_issuer import (
     AppWebSocketTicketVerifier,
 )
 from app.adapters.fake_live_adapter import FakeLiveAdapter
+from app.adapters.gemini_live_adapter import GeminiLiveAdapter
+from app.adapters.gemini_live_translate_adapter import GeminiLiveTranslateAdapter
+from app.adapters.gemini_text_adapter import GeminiTextAdapter
 from app.api.error_handlers import install_error_handlers
 from app.api.routes import cards, health, live, sessions
 from app.core.config import Settings
-from app.repositories.session_store import InMemorySessionStore
-from app.repositories.ticket_use_store import InMemoryTicketUseStore
+from app.db.session import create_engine, create_session_factory, initialize_database
+from app.repositories.memory_repository import MemoryRepository
+from app.repositories.notification_repository import NotificationRepository
+from app.repositories.session_repository import SQLiteSessionStore
+from app.repositories.ticket_use_repository import SQLiteTicketUseStore
+from app.repositories.trace_repository import TraceRepository
+from app.repositories.user_repository import UserRepository
+from app.repositories.visit_repository import VisitRepository
 from app.services.card_service import CardService
 from app.services.live_runtime_service import LiveRuntimeService
+from app.services.rag_service import RagService
 from app.services.session_service import SessionService
 from app.services.ticket_service import TicketService
+from app.services.translation_service import TranslationService
 
 DEFAULT_DEVELOPMENT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
@@ -33,10 +45,35 @@ def create_app(
     clock: Callable[[], datetime] = utc_now,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
-    app = FastAPI(title="Kith&Kin API")
-
-    session_store = InMemorySessionStore()
-    ticket_use_store = InMemoryTicketUseStore()
+    database_url = (
+        resolved_settings.test_database_url
+        if resolved_settings.environment == "test"
+        else resolved_settings.database_url
+    )
+    db_engine = create_engine(database_url)
+    db_sessions = create_session_factory(db_engine)
+    user_repository = UserRepository(db_sessions, clock)
+    session_store = SQLiteSessionStore(db_sessions)
+    ticket_use_store = SQLiteTicketUseStore(
+        db_sessions,
+        resolved_settings.app_ws_token_issuer,
+        clock,
+    )
+    memory_repository = MemoryRepository(db_sessions, clock)
+    trace_repository = TraceRepository(db_sessions, clock)
+    notification_repository = NotificationRepository(db_sessions, clock)
+    visit_repository = VisitRepository(db_sessions)
+    rag_service = RagService(resolved_settings, memory_repository, trace_repository)
+    gemini_live_adapter = GeminiLiveAdapter(resolved_settings)
+    translation_gateway = (
+        GeminiLiveTranslateAdapter(resolved_settings)
+        if resolved_settings.live_translation_fallback_enabled
+        else GeminiTextAdapter(resolved_settings)
+    )
+    translation_service = TranslationService(
+        translation_gateway,
+        timeout_ms=resolved_settings.rag_timeout_ms,
+    )
     session_service = SessionService(session_store, clock)
     issuer = AppWebSocketTicketIssuer(resolved_settings, clock)
     verifier = AppWebSocketTicketVerifier(
@@ -47,9 +84,31 @@ def create_app(
     )
     card_service = CardService()
 
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if resolved_settings.environment == "test":
+            await initialize_database(db_engine)
+        await user_repository.ensure_demo_user(user_id)
+        try:
+            yield
+        finally:
+            await db_engine.dispose()
+
+    app = FastAPI(title="Kith&Kin API", lifespan=lifespan)
+
     app.state.settings = resolved_settings
     app.state.user_id = user_id
+    app.state.db_engine = db_engine
+    app.state.db_sessions = db_sessions
+    app.state.user_repository = user_repository
     app.state.session_store = session_store
+    app.state.memory_repository = memory_repository
+    app.state.trace_repository = trace_repository
+    app.state.notification_repository = notification_repository
+    app.state.visit_repository = visit_repository
+    app.state.rag_service = rag_service
+    app.state.gemini_live_adapter = gemini_live_adapter
+    app.state.translation_service = translation_service
     app.state.session_service = session_service
     app.state.ticket_service = TicketService(resolved_settings, session_service, issuer)
     app.state.ticket_verifier = verifier
@@ -58,6 +117,7 @@ def create_app(
         card_service,
         FakeLiveAdapter(),
         clock,
+        translation_service,
     )
 
     install_error_handlers(app)

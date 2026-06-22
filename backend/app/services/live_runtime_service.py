@@ -1,15 +1,37 @@
 import json
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from app.adapters.fake_live_adapter import FakeLiveAdapter
+from app.adapters.provider_schemas import (
+    ProviderErrorEvent,
+    ProviderLiveEvent,
+    ProviderLiveEventType,
+    ProviderTranscriptEvent,
+    TranslationRequest,
+)
 from app.core.constants import SCHEMA_VERSION
 from app.schemas.runtime_events import CardConfirmEvent, parse_runtime_event
 from app.services.card_service import CardService
+from app.services.translation_service import TranslationService
+
+LIVE_UNAVAILABLE_ZH = (
+    "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5"
+    "\u5b9e\u65f6\u8bed\u97f3\u670d\u52a1\u3002"
+)
+TRANSLATION_UNAVAILABLE_ZH = (
+    "\u6682\u65f6\u65e0\u6cd5\u751f\u6210\u4e2d\u6587\u7ffb\u8bd1\uff0c"
+    "\u82f1\u6587\u539f\u6587\u4ecd\u4fdd\u7559\u3002"
+)
+TRANSLATION_UNAVAILABLE_EN = (
+    "Translation is temporarily unavailable; "
+    "the English transcript remains visible."
+)
 
 
 class LiveRuntimeService:
@@ -20,10 +42,12 @@ class LiveRuntimeService:
         card_service: CardService,
         fake_live: FakeLiveAdapter,
         clock: Callable[[], datetime],
+        translation_service: TranslationService | None = None,
     ) -> None:
         self._cards = card_service
         self._fake_live = fake_live
         self._clock = clock
+        self._translation_service = translation_service
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
 
     async def serve(
@@ -77,6 +101,31 @@ class LiveRuntimeService:
         except WebSocketDisconnect:
             return
 
+    async def handle_provider_event(
+        self,
+        session_id: UUID,
+        provider_event: ProviderLiveEvent,
+    ) -> tuple[dict[str, object], ...]:
+        """Append normalised provider events to the replay buffer."""
+        if isinstance(provider_event, ProviderTranscriptEvent):
+            return await self._handle_transcript_provider_event(session_id, provider_event)
+        if isinstance(provider_event, ProviderErrorEvent):
+            return (
+                self._append_event(
+                    session_id,
+                    "fallback.show",
+                    {
+                        "code": provider_event.code,
+                        "message_zh": LIVE_UNAVAILABLE_ZH,
+                        "message_en": "Live speech is temporarily unavailable.",
+                        "retryable": provider_event.retryable,
+                        "recovery_action": "reconnect",
+                        "related_event_id": provider_event.provider_event_id,
+                    },
+                ),
+            )
+        return ()
+
     def _initial_events(self, session_id: UUID) -> list[dict[str, object]]:
         return [
             self._event(
@@ -109,10 +158,8 @@ class LiveRuntimeService:
         if not isinstance(event, CardConfirmEvent):
             return
         result = self._cards.confirm(event.payload.confirmation_id)
-        buffer = self._buffers[session_id]
-        confirmed = self._event(
+        confirmed = self._append_event(
             session_id,
-            self._sequence(buffer[-1]) + 1,
             "card.confirmed",
             {
                 "confirmation_id": result.confirmation_id,
@@ -121,10 +168,91 @@ class LiveRuntimeService:
             },
             correlation_id=event.event_id,
         )
-        buffer.append(confirmed)
-        if len(buffer) > self.MAX_BUFFERED_EVENTS:
-            del buffer[: -self.MAX_BUFFERED_EVENTS]
         await websocket.send_json(confirmed)
+
+    async def _handle_transcript_provider_event(
+        self,
+        session_id: UUID,
+        provider_event: ProviderTranscriptEvent,
+    ) -> tuple[dict[str, object], ...]:
+        is_final = provider_event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+        transcript = self._append_event(
+            session_id,
+            "transcript.final" if is_final else "transcript.partial",
+            {
+                "utterance_id": provider_event.utterance_id,
+                "speaker": provider_event.speaker,
+                "language": provider_event.language,
+                "text": provider_event.text,
+                "revision": provider_event.revision,
+            },
+            correlation_id=provider_event.provider_event_id,
+        )
+        emitted = [transcript]
+        if not is_final or self._translation_service is None:
+            return tuple(emitted)
+        if self._translation_service.has_seen(provider_event.utterance_id):
+            return tuple(emitted)
+        source_event_id = _string_field(transcript, "event_id")
+        segment_id = f"seg_{provider_event.utterance_id}"
+        emitted.append(
+            self._append_event(
+                session_id,
+                "translation.pending",
+                {
+                    "source_transcript_event_id": source_event_id,
+                    "segment_id": segment_id,
+                },
+                correlation_id=source_event_id,
+            )
+        )
+        result = await self._translation_service.translate_final(
+            TranslationRequest(
+                source_event_id=source_event_id,
+                utterance_id=provider_event.utterance_id,
+                text=provider_event.text,
+                source_language=provider_event.language,
+            )
+        )
+        if result.duplicate:
+            return tuple(emitted[:-1])
+        if result.segment is not None:
+            emitted.append(
+                self._append_event(
+                    session_id,
+                    "translation.final",
+                    {
+                        "source_transcript_event_id": result.segment.source_transcript_event_id,
+                        "segment_id": result.segment.segment_id,
+                        "source_language": result.segment.source_language,
+                        "target_language": result.segment.target_language,
+                        "translated_text": result.segment.translated_text,
+                        "mode": "faithful",
+                        "append_only": True,
+                        "latency_ms": result.segment.latency_ms,
+                    },
+                    correlation_id=source_event_id,
+                )
+            )
+            return tuple(emitted)
+        fallback = result.fallback
+        assert fallback is not None
+        emitted.append(
+            self._append_event(
+                session_id,
+                "fallback.show",
+                {
+                    "code": fallback.code,
+                    "message_zh": TRANSLATION_UNAVAILABLE_ZH,
+                    "message_en": TRANSLATION_UNAVAILABLE_EN,
+                    "retryable": True,
+                    "recovery_action": "return_to_listening",
+                    "related_event_id": fallback.related_event_id,
+                },
+                correlation_id=source_event_id,
+            )
+        )
+        return tuple(emitted)
 
     @staticmethod
     def _sequence(event: dict[str, object]) -> int:
@@ -132,6 +260,27 @@ class LiveRuntimeService:
         if not isinstance(sequence, int):
             raise RuntimeError("RUNTIME_SEQUENCE_INVALID")
         return sequence
+
+    def _append_event(
+        self,
+        session_id: UUID,
+        event_type: str,
+        payload: dict[str, object],
+        *,
+        correlation_id: str | None = None,
+    ) -> dict[str, object]:
+        buffer = self._buffers.setdefault(session_id, self._initial_events(session_id))
+        event = self._event(
+            session_id,
+            self._sequence(buffer[-1]) + 1,
+            event_type,
+            payload,
+            correlation_id=correlation_id,
+        )
+        buffer.append(event)
+        if len(buffer) > self.MAX_BUFFERED_EVENTS:
+            del buffer[: -self.MAX_BUFFERED_EVENTS]
+        return event
 
     def _event(
         self,
@@ -152,3 +301,10 @@ class LiveRuntimeService:
             "correlation_id": correlation_id,
             "payload": payload,
         }
+
+
+def _string_field(event: dict[str, Any], field: str) -> str:
+    value = event[field]
+    if not isinstance(value, str):
+        raise RuntimeError("RUNTIME_EVENT_FIELD_INVALID")
+    return value

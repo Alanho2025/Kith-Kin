@@ -1,0 +1,6 @@
+{
+  "event_id": "provider_evt_error_1",
+  "type": "error",
+  "code": "TRANSCRIPTION_UNAVAILABLE",
+  "retryable": true
+}

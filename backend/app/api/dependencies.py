@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from typing import cast
 from uuid import UUID
 
 from fastapi import Request, WebSocket
@@ -11,19 +12,19 @@ from app.services.ticket_service import TicketService
 
 
 def get_user_id(request: Request) -> UUID:
-    return request.app.state.user_id
+    return cast(UUID, request.app.state.user_id)
 
 
 def get_session_service(request: Request) -> SessionService:
-    return request.app.state.session_service
+    return cast(SessionService, request.app.state.session_service)
 
 
 def get_ticket_service(request: Request) -> TicketService:
-    return request.app.state.ticket_service
+    return cast(TicketService, request.app.state.ticket_service)
 
 
 def get_card_service(request: Request) -> CardService:
-    return request.app.state.card_service
+    return cast(CardService, request.app.state.card_service)
 
 
 def websocket_dependencies(

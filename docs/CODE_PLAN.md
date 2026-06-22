@@ -144,7 +144,9 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 - Phase 02: complete; typed backend contracts cover every runtime event/command, card/MCP DTOs and state machines are green, and frontend/shared fixture mapping is green.
 - Phase 03: implemented with accessible mock runtime UI, reducer/hooks, confirmation/Guardian/fallback/summary flows, and automated checks green; final 360px/1280px browser screenshot sign-off remains externally blocked and is not claimed.
 - Phase 04: implemented with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter; acceptance remains dependent on the Phase 03 browser gate.
-- Phases 05–11 and 90: planned, not started. Phase 06 must resolve the recorded translation-sidecar latency failure without changing the backend-proxy topology or lowering the Phase 00 threshold.
+- Phase 05: implemented with SQLite schema/migration, scoped repositories, atomic ticket JTI consumption, bounded RAG, canonical MCP tool manifest/adapter, demo seed/cleanup, and redacted trace primitives.
+- Phase 06: fixture-backed implementation complete with provider-normalised Gemini Live events, faithful final-turn text translation sidecar, append-only translation runtime events, deduplication, timeout fallback, and task cleanup. Credential-backed real smoke is `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied.
+- Phases 07–11 and 90: planned, not started. Phase 07 can build on the Phase 05 read-only MCP filter and Phase 06 provider fixtures without changing the backend-proxy topology.
 
 ## Phase 00–02 Verification Record
 
@@ -182,3 +184,18 @@ Recorded 2026-06-22:
 | Persistence/migrations | none; Phase 04 stores remain injected in-memory implementations |
 
 Phase 03 browser details and the remaining sign-off work are recorded in `docs/PHASE_03_BROWSER_QA.md`.
+
+## Phase 05–06 Verification Record
+
+Recorded 2026-06-22:
+
+| Check | Result |
+|---|---|
+| Phase 05/06 focused backend tests | 17 passed |
+| Full backend pytest | 102 passed |
+| Ruff | all checks passed |
+| Mypy | 68 source files, no issues |
+| Migration round trip | upgrade -> downgrade -> upgrade covered by integration test |
+| Real Gemini Live/translation smoke | `blocked_missing_credentials`; `GOOGLE_API_KEY` not present |
+
+The Phase 06 production SDK session remains behind the `GeminiLiveAdapter` boundary and is not claimed without credentials. The public backend WebSocket shape remains unchanged.

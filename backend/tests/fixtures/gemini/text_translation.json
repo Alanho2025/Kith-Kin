@@ -1,0 +1,7 @@
+{
+  "source_event_id": "evt_source_1",
+  "utterance_id": "utt_demo_1",
+  "source_text": "Do you have any allergies to antibiotics?",
+  "translated_text": "\u4f60\u5bf9\u6297\u751f\u7d20\u8fc7\u654f\u5417\uff1f",
+  "latency_ms": 410
+}
