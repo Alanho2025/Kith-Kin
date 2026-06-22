@@ -6,7 +6,7 @@ Execution mode: strict test-driven development
 
 ## Goal
 
-Build a local-first, production-shaped pharmacy companion demo with one backend-proxied Gemini Live session, faithful visual translation, ADK Router/Companion/Guardian reasoning, PostgreSQL-backed retrieval, confirmation-gated actions, redacted traces, and a React elderly-friendly UI.
+Build a local-first, production-shaped pharmacy companion demo with one backend-proxied Gemini Live session, faithful visual translation, ADK Router/Companion/Guardian reasoning, SQLite-backed retrieval, confirmation-gated actions, redacted traces, and a React elderly-friendly UI.
 
 ## Authority
 
@@ -97,7 +97,7 @@ Ticket close codes:
 | 02 | Canonical domain types and state machines | Backend/frontend fixtures agree; unit suites green |
 | 03 | Elderly UI on mock runtime | RTL and browser UX checkpoint |
 | 04 | Session ticket and fake WebSocket runtime | Ticket abuse and reconnect integration tests |
-| 05 | PostgreSQL RAG and stdio MCP | PostgreSQL-only integration and tool contract tests |
+| 05 | SQLite RAG and stdio MCP | SQLite-only integration and tool contract tests |
 | 06 | Gemini Live and translation sidecar | Provider fixtures plus opt-in real smoke |
 | 07 | ADK Router, Guardian, Companion | Deterministic orchestration tests and agent evals |
 | 08 | Card confirmation and half-duplex audio | Consent, replay, and audio ordering gates |
@@ -140,7 +140,7 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 ## Current Status
 
 - Phase 00: complete with deterministic fixture PASS; authenticated Gemini validation is explicitly `blocked_missing_credentials` and remains the external D1 checkpoint.
-- Phase 01: complete; dependency locks, environment examples, ignore policy, secret scanner, PostgreSQL Compose config, and quality toolchains are green.
+- Phase 01: complete; dependency locks, environment examples, ignore policy, secret scanner, SQLite environment config, and quality toolchains are green.
 - Phase 02: complete; typed backend contracts cover every runtime event/command, card/MCP DTOs and state machines are green, and frontend/shared fixture mapping is green.
 - Phases 03–11 and 90: planned, not started.
 
@@ -161,4 +161,4 @@ Recorded 2026-06-22:
 | Sanitised Live fixture | pass; 10/10 finals, 900 ms transcription P95, 410 ms translation P95, 0 contamination |
 | Real Live provider check | `blocked_missing_credentials`; no result fabricated |
 
-The eval runner, PostgreSQL migrations, FastAPI runtime, ADK agents, and live provider adapters belong to later phases and are not claimed by this checkpoint.
+The eval runner, SQLite migrations, FastAPI runtime, ADK agents, and live provider adapters belong to later phases and are not claimed by this checkpoint.
