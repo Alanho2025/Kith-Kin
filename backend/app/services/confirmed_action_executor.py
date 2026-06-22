@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.core.constants import CardActionType
 from app.domain.confirmation import ConfirmationOutcome
+from app.domain.credentials import TrustedRequestContext
 from app.schemas.cards import ResponseCard
 
 
@@ -23,7 +24,12 @@ class ConfirmedActionExecutor:
     def __init__(self) -> None:
         self.action_count = 0
 
-    async def execute(self, confirmation_id: str, card: ResponseCard) -> ConfirmationOutcome:
+    async def execute(
+        self,
+        confirmation_id: str,
+        card: ResponseCard,
+        context: TrustedRequestContext | None = None,
+    ) -> ConfirmationOutcome:
         self.action_count += 1
         return ConfirmationOutcome(
             confirmation_id=confirmation_id,

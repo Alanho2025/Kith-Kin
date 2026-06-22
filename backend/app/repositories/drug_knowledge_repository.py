@@ -1,6 +1,7 @@
 """Repository for general drug knowledge and interaction rules."""
 
 from typing import Any
+
 from sqlalchemy import select
 
 from app.db.models.drug_interaction_rule import DrugInteractionRule
