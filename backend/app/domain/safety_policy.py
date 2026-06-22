@@ -104,7 +104,21 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.ADDRESS_REQUEST,
         )
-    if any(marker in lowered for marker in ("stop taking", "change your dose", "take double")):
+    medical_confirmation_markers = (
+        "stop taking",
+        "change your dose",
+        "take double",
+        "ibuprofen",
+        "lisinopril",
+        "medicine",
+        "medication",
+        "drug",
+        "allergy",
+        "allergies",
+        "antibiotic",
+        "dose",
+    )
+    if any(marker in lowered for marker in medical_confirmation_markers):
         return (
             SafetyBackstopResult.REQUIRE_CONFIRMATION,
             BackstopRisk.MEDICAL,
