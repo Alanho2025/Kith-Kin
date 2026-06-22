@@ -8,12 +8,22 @@ PHARMACY_MARKERS = (
     "medication",
     "drug",
     "allergy",
+    "allergies",
     "antibiotic",
     "lisinopril",
     "ibuprofen",
     "dose",
 )
-PRIVACY_MARKERS = ("credit card", "passport", "medicare", "home address", "cvv")
+PRIVACY_MARKERS = (
+    "credit card",
+    "passport",
+    "medicare",
+    "home address",
+    "cvv",
+    "ignore previous",
+    "system prompt",
+    "developer message",
+)
 
 
 class RouterAgent:

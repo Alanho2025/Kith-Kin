@@ -1,7 +1,7 @@
 # Kith&Kin Evaluation Cases
 
 Version: 0.1
-Status: Draft for implementation
+Status: executable deterministic subset implemented; remaining catalogue cases planned
 Primary scenario: Elderly Chinese-speaking user visits an Australian pharmacy alone
 Related files: `AGENTS.md`, `ARCHITECTURE.md`, `eval/cases.json`
 
@@ -982,7 +982,7 @@ An eval case is complete only when:
 Target command:
 
 ```bash
-python -m eval.run eval/cases.json
+python -m evals.run evals/cases.json
 ```
 
 The eval runner should print:
