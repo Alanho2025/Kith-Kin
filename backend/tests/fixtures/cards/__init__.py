@@ -1,0 +1,1 @@
+"""Card test fixtures."""

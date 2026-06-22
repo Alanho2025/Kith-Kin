@@ -15,10 +15,13 @@ from app.adapters.provider_schemas import (
     ProviderTranscriptEvent,
     TranslationRequest,
 )
-from app.core.constants import SCHEMA_VERSION
-from app.schemas.runtime_events import CardConfirmEvent, parse_runtime_event
+from app.core.constants import SCHEMA_VERSION, GuardianDecisionType
+from app.domain.credentials import TrustedRequestContext
+from app.schemas.runtime_events import CardConfirmEvent, TranscriptFinalEvent, parse_runtime_event
 from app.services.card_service import CardService
+from app.services.runtime_command_service import RuntimeCommandService
 from app.services.translation_service import TranslationService
+from app.services.turn_orchestrator import TurnOrchestrator
 
 LIVE_UNAVAILABLE_ZH = (
     "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5"
@@ -43,11 +46,17 @@ class LiveRuntimeService:
         fake_live: FakeLiveAdapter,
         clock: Callable[[], datetime],
         translation_service: TranslationService | None = None,
+        command_service: RuntimeCommandService | None = None,
+        turn_orchestrator: TurnOrchestrator | None = None,
+        user_id: UUID | None = None,
     ) -> None:
         self._cards = card_service
         self._fake_live = fake_live
         self._clock = clock
         self._translation_service = translation_service
+        self._command_service = command_service
+        self._turn_orchestrator = turn_orchestrator
+        self._user_id = user_id
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
 
     async def serve(
@@ -155,6 +164,17 @@ class LiveRuntimeService:
             event = parse_runtime_event(json.loads(text))
         except (ValueError, json.JSONDecodeError):
             return
+        if self._command_service is not None:
+            outcomes = await self._command_service.handle(event, session_id=session_id)
+            for outcome in outcomes:
+                emitted = self._append_event(
+                    session_id,
+                    outcome.event_type,
+                    outcome.payload,
+                    correlation_id=outcome.correlation_id,
+                )
+                await websocket.send_json(emitted)
+            return
         if not isinstance(event, CardConfirmEvent):
             return
         result = self._cards.confirm(event.payload.confirmation_id)
@@ -190,9 +210,9 @@ class LiveRuntimeService:
         )
         emitted = [transcript]
         if not is_final or self._translation_service is None:
-            return tuple(emitted)
+            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         if self._translation_service.has_seen(provider_event.utterance_id):
-            return tuple(emitted)
+            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         source_event_id = _string_field(transcript, "event_id")
         segment_id = f"seg_{provider_event.utterance_id}"
         emitted.append(
@@ -252,7 +272,67 @@ class LiveRuntimeService:
                 correlation_id=source_event_id,
             )
         )
-        return tuple(emitted)
+        return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+
+    async def _append_turn_outcome(
+        self,
+        session_id: UUID,
+        transcript: dict[str, object],
+        emitted: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        if self._turn_orchestrator is None or self._user_id is None:
+            return emitted
+        event = TranscriptFinalEvent.model_validate(transcript)
+        outcome = await self._turn_orchestrator.process_final_turn(
+            event,
+            TrustedRequestContext(session_id=session_id, user_id=self._user_id, origin="runtime"),
+        )
+        emitted.append(
+            self._append_event(
+                session_id,
+                "route.decision",
+                {
+                    "source_transcript_event_id": event.event_id,
+                    "route_type": outcome.route.route_type.value,
+                    "confidence": outcome.route.confidence,
+                    "reason_code": outcome.route.reason_code.value,
+                },
+                correlation_id=event.event_id,
+            )
+        )
+        if outcome.guardian.decision is GuardianDecisionType.BLOCK:
+            emitted.append(
+                self._append_event(
+                    session_id,
+                    "guardian.warning",
+                    {
+                        "guardian_decision_id": outcome.guardian.guardian_decision_id,
+                        "source_event_id": event.event_id,
+                        "decision": outcome.guardian.decision.value,
+                        "risk_level": outcome.guardian.risk_level.value,
+                        "reason_code": outcome.guardian.reason_code.value,
+                        "warning_type": "privacy_block",
+                        "zh_title": "已为你拦截敏感请求",
+                        "zh_message": "这类信息不应自动提供。你可以请药剂师换一种方式确认。",
+                        "safe_card_set_id": None,
+                    },
+                    correlation_id=event.event_id,
+                )
+            )
+        if (
+            outcome.card_proposal is not None
+            and outcome.card_review is not None
+            and outcome.card_review.decision is GuardianDecisionType.ALLOW
+        ):
+            emitted.append(
+                self._append_event(
+                    session_id,
+                    "cards.render",
+                    {"card_set": outcome.card_proposal.card_set.model_dump(mode="json")},
+                    correlation_id=event.event_id,
+                )
+            )
+        return emitted
 
     @staticmethod
     def _sequence(event: dict[str, object]) -> int:
