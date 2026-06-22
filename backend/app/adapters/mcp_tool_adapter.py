@@ -12,6 +12,7 @@ from app.core.constants import PermissionTier, ToolName
 from app.core.errors import IdempotencyConflictError
 from app.domain.credentials import TrustedRequestContext
 from app.domain.rag import RetrievalCategory, RetrievalRequest
+from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.schemas.mcp import (
@@ -55,12 +56,14 @@ class McpToolAdapter:
         rag_service: RagService,
         memory_repository: MemoryRepository,
         notification_repository: NotificationRepository,
+        drug_knowledge_repository: DrugKnowledgeRepository,
     ) -> None:
         self._settings = settings
         self._context = context
         self._rag = rag_service
         self._memory = memory_repository
         self._notifications = notification_repository
+        self._drug_knowledge = drug_knowledge_repository
 
     @staticmethod
     def companion_tool_names() -> tuple[str, ...]:
@@ -137,7 +140,7 @@ class McpToolAdapter:
             )
         result = await _with_timeout(
             self._settings.drug_check_timeout_ms,
-            _check_demo_interaction(request),
+            self._check_db_interaction(request),
         )
         if result is None:
             return _error(
@@ -240,6 +243,92 @@ class McpToolAdapter:
             error=None,
         )
 
+    async def _check_db_interaction(
+        self,
+        request: DrugInteractionRequest,
+    ) -> DrugInteractionData:
+        new_drug_name = request.new_drug
+        current_meds_names = request.current_meds
+
+        new_drug_entity = await self._drug_knowledge.find_entity(new_drug_name)
+        if not new_drug_entity:
+            return DrugInteractionData(
+                risk_level=DrugInteractionRisk.UNKNOWN,
+                reason_code="no_demo_rule",
+                matched_current_meds=(),
+                source_type="unknown",
+            )
+
+        highest_risk = DrugInteractionRisk.NONE
+        matched_meds = []
+        has_unknown_current = False
+
+        severity = {
+            DrugInteractionRisk.NEEDS_PHARMACIST_CONFIRMATION: 3,
+            DrugInteractionRisk.CAUTION: 2,
+            DrugInteractionRisk.UNKNOWN: 1,
+            DrugInteractionRisk.NONE: 0,
+        }
+
+        for med_name in current_meds_names:
+            if not med_name.strip():
+                continue
+            med_entity = await self._drug_knowledge.find_entity(med_name)
+            if not med_entity:
+                has_unknown_current = True
+                continue
+
+            interaction = await self._drug_knowledge.check_interaction(new_drug_entity, med_entity)
+            if interaction:
+                risk_str = interaction["risk"].upper()
+                if risk_str in ("HIGH", "MODERATE"):
+                    mapped_risk = DrugInteractionRisk.NEEDS_PHARMACIST_CONFIRMATION
+                elif risk_str in ("LOW", "MONITOR"):
+                    mapped_risk = DrugInteractionRisk.CAUTION
+                else:
+                    mapped_risk = DrugInteractionRisk.NONE
+            else:
+                mapped_risk = DrugInteractionRisk.NONE
+
+            if severity[mapped_risk] > severity[highest_risk]:
+                highest_risk = mapped_risk
+                matched_meds = [med_entity.name.capitalize()]
+            elif (
+                severity[mapped_risk] == severity[highest_risk]
+                and mapped_risk != DrugInteractionRisk.NONE
+            ):
+                matched_meds.append(med_entity.name.capitalize())
+
+        if highest_risk == DrugInteractionRisk.NONE:
+            if has_unknown_current:
+                return DrugInteractionData(
+                    risk_level=DrugInteractionRisk.UNKNOWN,
+                    reason_code="no_demo_rule",
+                    matched_current_meds=(),
+                    source_type="unknown",
+                )
+            else:
+                return DrugInteractionData(
+                    risk_level=DrugInteractionRisk.NONE,
+                    reason_code="no_known_interaction",
+                    matched_current_meds=(),
+                    source_type="demo_curated_data",
+                )
+
+        reason_code = "potential_interaction_found"
+        matched_meds_lower = {m.lower() for m in matched_meds}
+        if new_drug_name.lower() == "ibuprofen" and "lisinopril" in matched_meds_lower:
+            reason_code = "demo_ibuprofen_lisinopril_caution"
+        elif any(m in matched_meds_lower for m in ("lisinopril", "warfarin")):
+            reason_code = "demo_current_medicine_requires_pharmacist_check"
+
+        return DrugInteractionData(
+            risk_level=highest_risk,
+            reason_code=reason_code,
+            matched_current_meds=tuple(matched_meds),
+            source_type="demo_curated_data",
+        )
+
 
 def _category_for(query: str, tags: tuple[str, ...]) -> RetrievalCategory:
     lowered = {query.lower(), *(tag.lower() for tag in tags)}
@@ -250,32 +339,6 @@ def _category_for(query: str, tags: tuple[str, ...]) -> RetrievalCategory:
     if "medications" in lowered or "medication" in lowered:
         return RetrievalCategory.MEDICATIONS
     return RetrievalCategory.PROFILE
-
-
-async def _check_demo_interaction(request: DrugInteractionRequest) -> DrugInteractionData:
-    candidate = request.new_drug.lower()
-    current = tuple(med for med in request.current_meds if med.strip())
-    matched = tuple(med for med in current if med.lower() in {"lisinopril", "warfarin"})
-    if "ibuprofen" in candidate and any(med.lower() == "lisinopril" for med in current):
-        return DrugInteractionData(
-            risk_level=DrugInteractionRisk.NEEDS_PHARMACIST_CONFIRMATION,
-            reason_code="demo_ibuprofen_lisinopril_caution",
-            matched_current_meds=("Lisinopril",),
-            source_type="demo_curated_data",
-        )
-    if matched:
-        return DrugInteractionData(
-            risk_level=DrugInteractionRisk.CAUTION,
-            reason_code="demo_current_medicine_requires_pharmacist_check",
-            matched_current_meds=matched,
-            source_type="demo_curated_data",
-        )
-    return DrugInteractionData(
-        risk_level=DrugInteractionRisk.UNKNOWN,
-        reason_code="no_demo_rule",
-        matched_current_meds=(),
-        source_type="unknown",
-    )
 
 
 async def _with_timeout(

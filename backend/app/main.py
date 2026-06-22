@@ -20,6 +20,7 @@ from app.api.error_handlers import install_error_handlers
 from app.api.routes import cards, health, live, sessions
 from app.core.config import Settings
 from app.db.session import create_engine, create_session_factory, initialize_database
+from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.session_repository import SQLiteSessionStore
@@ -65,6 +66,7 @@ def create_app(
         clock,
     )
     memory_repository = MemoryRepository(db_sessions, clock)
+    drug_knowledge_repository = DrugKnowledgeRepository(db_sessions)
     trace_repository = TraceRepository(db_sessions, clock)
     notification_repository = NotificationRepository(db_sessions, clock)
     visit_repository = VisitRepository(db_sessions)
@@ -118,6 +120,7 @@ def create_app(
     app.state.user_repository = user_repository
     app.state.session_store = session_store
     app.state.memory_repository = memory_repository
+    app.state.drug_knowledge_repository = drug_knowledge_repository
     app.state.trace_repository = trace_repository
     app.state.notification_repository = notification_repository
     app.state.visit_repository = visit_repository
