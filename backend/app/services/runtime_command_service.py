@@ -63,12 +63,22 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, CardConfirmEvent):
-            outcome = await self._cards.confirm_selected(event.payload.confirmation_id, context)
-            payload: dict[str, object] = {
-                "confirmation_id": outcome.confirmation_id,
-                "action_type": outcome.action_type.value,
-                "replayed": outcome.replayed,
-            }
+            payload: dict[str, object]
+            try:
+                outcome = await self._cards.confirm_selected(event.payload.confirmation_id, context)
+                payload = {
+                    "confirmation_id": outcome.confirmation_id,
+                    "action_type": outcome.action_type.value,
+                    "replayed": outcome.replayed,
+                }
+            except CardConfirmationError as error:
+                payload = {
+                    "confirmation_id": event.payload.confirmation_id,
+                    "action_type": CardActionType.NO_ACTION.value,
+                    "phase": "blocked",
+                    "code": error.code,
+                }
+                return (RuntimeCommandEvent("card.action.status", payload, event.event_id),)
             return (RuntimeCommandEvent("card.confirmed", payload, event.event_id),)
         if isinstance(event, CardCancelEvent):
             await self._cards.cancel(event.payload.confirmation_id, context)

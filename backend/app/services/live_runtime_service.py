@@ -216,7 +216,9 @@ class LiveRuntimeService:
             correlation_id=provider_event.provider_event_id,
         )
         emitted = [transcript]
-        if not is_final or self._translation_service is None:
+        if not is_final:
+            return tuple(emitted)
+        if self._translation_service is None:
             return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         if self._translation_service.has_seen(provider_event.utterance_id):
             return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
@@ -261,7 +263,7 @@ class LiveRuntimeService:
                     correlation_id=source_event_id,
                 )
             )
-            return tuple(emitted)
+            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         fallback = result.fallback
         assert fallback is not None
         emitted.append(
