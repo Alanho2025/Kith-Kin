@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 
 import { ConversationPage } from "../pages/ConversationPage";
 import { StartPage } from "../pages/StartPage";
@@ -11,20 +11,29 @@ export function AppRouter() {
   const [started, setStarted] = useState(false);
   const [isMock, setIsMock] = useState(true);
   const [realSessionId, setRealSessionId] = useState<string>("");
+  const [sessionLoading, setSessionLoading] = useState(false);
 
-  // Create a new backend session on mount when not in mock mode
-  useEffect(() => {
-    if (!isMock && !realSessionId) {
-      const base = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
-      fetch(`${base}/sessions`, { method: "POST" })
-        .then((r) => r.json())
-        .then((data) => setRealSessionId(data.session_id))
-        .catch(() => {
-          // fallback — user will see the error in the console
-          setRealSessionId("fallback-session");
-        });
+  async function handleStart() {
+    if (isMock) {
+      setStarted(true);
+      return;
     }
-  }, [isMock, realSessionId]);
+    setSessionLoading(true);
+    try {
+      const base = (import.meta as any).env?.VITE_API_BASE_URL ?? "/api";
+      const res = await fetch(`${base}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ encounter_type: "pharmacy" }),
+      });
+      const data = await res.json();
+      setRealSessionId(data.session_id);
+      setStarted(true);
+    } catch {
+      setRealSessionId("fallback-session");
+      setStarted(true);
+    }
+  }
 
   const runtime = useMemo(() => {
     if (isMock) {
@@ -38,7 +47,7 @@ export function AppRouter() {
     <ConversationPage runtime={runtime} sessionId={isMock ? "mock-session" : realSessionId} isMock={isMock} />
   ) : (
     <StartPage
-      onStart={() => setStarted(true)}
+      onStart={handleStart}
       isMock={isMock}
       onToggleMock={(val) => setIsMock(val)}
     />
