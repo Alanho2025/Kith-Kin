@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.agents.companion_agent import CompanionAgent
 from app.agents.guardian_agent import GuardianAgent
+from app.agents.router_agent import RouterAgent
 from app.core.constants import GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
@@ -114,3 +115,29 @@ async def test_guardian_block_skips_companion_cards() -> None:
 
     assert outcome.guardian.decision is GuardianDecisionType.BLOCK
     assert outcome.card_proposal is None
+
+
+async def test_adk_path_preserves_deterministic_router_and_guardian_results() -> None:
+    class EmptyProfileResult:
+        ok = True
+        data = None
+
+    class EmptyMcpAdapter:
+        async def memory_search(self, *_args):
+            return EmptyProfileResult()
+
+    orchestrator = TurnOrchestrator(
+        RouterAgent(),
+        GuardianAgent(),
+        CompanionAgent(lambda: NOW),
+        CardService(lambda: NOW),
+        mcp_tool_adapter_factory=lambda _context: EmptyMcpAdapter(),
+    )
+
+    outcome = await orchestrator.process_final_turn(
+        final_event("The pharmacy closes at five."),
+        context(),
+    )
+
+    assert outcome.route.route_type is RouteType.PASSIVE_TRANSLATION
+    assert outcome.guardian.decision is GuardianDecisionType.ALLOW
