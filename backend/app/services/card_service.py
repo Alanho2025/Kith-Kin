@@ -1,5 +1,6 @@
 """Card selection, confirmation, replay, and cancellation workflow."""
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -44,6 +45,7 @@ class CardService:
         self._card_sets: dict[tuple[str, str], CardSet] = {}
         self._card_contexts: dict[str, TrustedRequestContext] = {}
         self._lock = Lock()
+        self._confirm_lock = asyncio.Lock()
 
     def register_card_set(self, card_set: CardSet, context: TrustedRequestContext) -> None:
         """Store an approved card set for later selection; no action is executed."""
@@ -96,36 +98,38 @@ class CardService:
         context: TrustedRequestContext,
     ) -> ConfirmationOutcome:
         """Confirm and execute one stored action, replaying the stored outcome."""
-        record = self._repository.get(confirmation_id)
-        if record is None:
-            raise CardConfirmationError("CARD_NOT_FOUND")
-        if record.session_id != context.session_id or record.user_id != context.user_id:
-            raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
-        if record.state == "cancelled":
-            raise CardConfirmationError("ACTION_BLOCKED")
-        if record.terminal_outcome is not None:
-            return replace(record.terminal_outcome, replayed=True)
-        if record.expires_at <= self._clock():
-            raise CardConfirmationError("CONFIRMATION_EXPIRED")
-        card_set = self._card_sets.get((str(context.session_id), record.card_set_id))
-        if card_set is None:
-            raise CardConfirmationError("CARD_NOT_FOUND")
-        card = _find_card(card_set, record.card_id)
-        if _action_hash(card) != record.action_hash:
-            raise CardConfirmationError("ACTION_INTEGRITY_FAILED")
-        outcome = await self._executor.execute(confirmation_id, card)
-        self._repository.update(replace(record, state="confirmed", terminal_outcome=outcome))
-        return outcome
+        async with self._confirm_lock:
+            record = self._repository.get(confirmation_id)
+            if record is None:
+                raise CardConfirmationError("CARD_NOT_FOUND")
+            if record.session_id != context.session_id or record.user_id != context.user_id:
+                raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
+            if record.state == "cancelled":
+                raise CardConfirmationError("ACTION_BLOCKED")
+            if record.terminal_outcome is not None:
+                return replace(record.terminal_outcome, replayed=True)
+            if record.expires_at <= self._clock():
+                raise CardConfirmationError("CONFIRMATION_EXPIRED")
+            card_set = self._card_sets.get((str(context.session_id), record.card_set_id))
+            if card_set is None:
+                raise CardConfirmationError("CARD_NOT_FOUND")
+            card = _find_card(card_set, record.card_id)
+            if _action_hash(card) != record.action_hash:
+                raise CardConfirmationError("ACTION_INTEGRITY_FAILED")
+            outcome = await self._executor.execute(confirmation_id, card)
+            self._repository.update(replace(record, state="confirmed", terminal_outcome=outcome))
+            return outcome
 
     async def cancel(self, confirmation_id: str, context: TrustedRequestContext) -> None:
         """Cancel one pending confirmation without executing an action."""
-        record = self._repository.get(confirmation_id)
-        if record is None:
-            return
-        if record.session_id != context.session_id or record.user_id != context.user_id:
-            raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
-        if record.terminal_outcome is None:
-            self._repository.update(replace(record, state="cancelled"))
+        async with self._confirm_lock:
+            record = self._repository.get(confirmation_id)
+            if record is None:
+                return
+            if record.session_id != context.session_id or record.user_id != context.user_id:
+                raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
+            if record.terminal_outcome is None:
+                self._repository.update(replace(record, state="cancelled"))
 
     def confirm(self, confirmation_id: str) -> ConfirmationResult:
         """Compatibility path used by Phase 04 recovery tests."""

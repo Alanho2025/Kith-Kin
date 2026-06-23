@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+from app.core.constants import CardActionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import CardConfirmEvent, CardSelectEvent, SelfSpeakEvent
 from app.services.card_service import CardService
@@ -89,6 +90,25 @@ async def test_card_select_confirm_and_replay_are_idempotent() -> None:
     assert confirmed[0].payload["replayed"] is False
     assert replayed[0].payload["replayed"] is True
     assert executor.action_count == 1
+
+
+async def test_invalid_confirm_fails_closed_without_legacy_execution() -> None:
+    executor = ConfirmedActionExecutor()
+    commands = RuntimeCommandService(CardService(lambda: NOW, executor), USER_ID)
+
+    events = await commands.handle(
+        card_confirm_event("confirmation-not-issued"),
+        session_id=SESSION_ID,
+    )
+
+    assert events[0].event_type == "card.action.status"
+    assert events[0].payload == {
+        "confirmation_id": "confirmation-not-issued",
+        "action_type": CardActionType.NO_ACTION.value,
+        "phase": "blocked",
+        "code": "CARD_NOT_FOUND",
+    }
+    assert executor.action_count == 0
 
 
 async def test_self_speak_restores_listening_without_card_action() -> None:
