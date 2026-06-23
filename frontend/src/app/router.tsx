@@ -20,7 +20,7 @@ export function AppRouter() {
   }, [isMock]);
 
   return started ? (
-    <ConversationPage runtime={runtime} sessionId="ses-demo" isMock={isMock} />
+    <ConversationPage runtime={runtime} sessionId="00000000-0000-4000-8000-000000000101" isMock={isMock} />
   ) : (
     <StartPage
       onStart={() => setStarted(true)}
