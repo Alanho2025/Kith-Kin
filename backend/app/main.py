@@ -53,6 +53,10 @@ def create_app(
     clock: Callable[[], datetime] = utc_now,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    if resolved_settings.google_api_key.get_secret_value():
+        import os
+        os.environ["GOOGLE_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
+        os.environ["GEMINI_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
     database_url = (
         resolved_settings.test_database_url
         if resolved_settings.environment == "test"
@@ -177,13 +181,15 @@ def create_app(
     app.state.ticket_verifier = verifier
     app.state.card_service = card_service
     live_runtime_service = LiveRuntimeService(
-        card_service,
-        FakeLiveAdapter(),
-        clock,
-        translation_service,
-        runtime_command_service,
-        turn_orchestrator,
-        user_id,
+        card_service=card_service,
+        fake_live=FakeLiveAdapter(),
+        clock=clock,
+        translation_service=translation_service,
+        command_service=runtime_command_service,
+        turn_orchestrator=turn_orchestrator,
+        user_id=user_id,
+        live_gateway=gemini_live_adapter,
+        settings=resolved_settings,
     )
     app.state.live_runtime_service = live_runtime_service
     app.state.visit_completion_service = completion_service
