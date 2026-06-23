@@ -7,25 +7,24 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
-from google.adk.runners import Runner
 from google.adk.events import Event
-from google.genai import types
+from google.adk.runners import Runner
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
+from app.agents.companion_agent import (
+    build_companion_instruction,
+    load_companion_prompt_template,
+    make_check_drug_interaction,
+    make_memory_search,
+    make_submit_response_cards,
+)
+from app.agents.orchestrator_agent import OrchestratorAgent
 from app.core.constants import GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.agent_outputs import CardSetProposal, GuardianDecision, RouteDecision, RouteType
 from app.schemas.cards import CardSet
 from app.schemas.runtime_events import TranscriptFinalEvent
 from app.services.card_service import CardService
-from app.agents.orchestrator_agent import OrchestratorAgent
-from app.agents.companion_agent import (
-    make_memory_search,
-    make_check_drug_interaction,
-    make_submit_response_cards,
-    load_companion_prompt_template,
-    build_companion_instruction,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +104,9 @@ class TurnOrchestrator:
         Returns:
             The orchestration TurnOutcome.
         """
+        proposal: CardSetProposal | None = None
+        card_review: GuardianDecision | None = None
+
         # Fallback for legacy unit tests (e.g., test_turn_orchestrator.py)
         if self._mcp_tool_adapter_factory is None:
             async with asyncio.TaskGroup() as tg:
@@ -129,8 +131,9 @@ class TurnOrchestrator:
             return TurnOutcome(route, guardian, proposal, card_review)
 
         # 1. Instantiate the ADK session and runner
-        session_service = InMemorySessionService()
+        session_service = InMemorySessionService()  # type: ignore[no-untyped-call]
         mcp_adapter = self._mcp_tool_adapter_factory(context)
+        companion_any: Any = self._companion
 
         # 2. Warm medications and allergies
         meds = []
@@ -152,10 +155,12 @@ class TurnOrchestrator:
             logger.warning("Failed to warm patient profile in turn orchestrator")
 
         prior_summary = None
-        if getattr(self._companion, "_session_service", None) is not None:
+        if getattr(companion_any, "_session_service", None) is not None:
             try:
                 sid = UUID(str(event.session_id))
-                cached = getattr(self._companion._session_service, "prefetch_cache", {}).get(sid, [])
+                cached = getattr(
+                    companion_any._session_service, "prefetch_cache", {}
+                ).get(sid, [])
                 for val in cached:
                     advice = val.get("pharmacist_advice_summary", "")
                     unresolved = val.get("unresolved_questions", [])
@@ -171,7 +176,9 @@ class TurnOrchestrator:
 
         # Load prompt instruction
         base_prompt = load_companion_prompt_template()
-        companion_instruction = build_companion_instruction(base_prompt, meds, allergies, prior_summary)
+        companion_instruction = build_companion_instruction(
+            base_prompt, meds, allergies, prior_summary
+        )
 
         # Bind tools
         tools = [
@@ -181,7 +188,7 @@ class TurnOrchestrator:
         ]
 
         # Use the companion ADK agent instance and clone it with bound tools/prompts
-        companion_agent = self._companion.clone(
+        companion_agent = companion_any.clone(
             update={
                 "instruction": companion_instruction,
                 "tools": tools,
@@ -233,6 +240,7 @@ class TurnOrchestrator:
         session = await session_service.get_session(
             app_name="agents", user_id=user_id, session_id=session_id
         )
+        assert session is not None
 
         route_data = session.state.get("route_decision")
         guardian_data = session.state.get("guardian_decision")
@@ -249,7 +257,10 @@ class TurnOrchestrator:
         proposal = None
         card_review = None
 
-        if guardian.decision is not GuardianDecisionType.BLOCK and route.route_type not in _NO_COMPANION_ROUTES:
+        if (
+            guardian.decision is not GuardianDecisionType.BLOCK
+            and route.route_type not in _NO_COMPANION_ROUTES
+        ):
             if not proposal_data:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)

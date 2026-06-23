@@ -117,6 +117,8 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
         "allergies",
         "antibiotic",
         "dose",
+        "prescription",
+        "refill",
     )
     if any(marker in lowered for marker in medical_confirmation_markers):
         return (

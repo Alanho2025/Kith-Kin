@@ -1,7 +1,8 @@
 """Guardian safety agent inheriting from ADK BaseAgent."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 from uuid import uuid4
+
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event
@@ -91,7 +92,7 @@ class GuardianAgent(BaseAgent):
             reason_code=GuardianReasonCode.SAFE_TURN,
         )
 
-    def review_cards(self, card_set: CardSet) -> GuardianDecision:
+    async def review_cards(self, card_set: CardSet) -> GuardianDecision:
         """Inspect a proposed card set for safety compliance.
 
         Args:

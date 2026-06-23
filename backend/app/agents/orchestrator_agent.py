@@ -1,18 +1,20 @@
 """ADK OrchestratorAgent fanning out Router, Guardian, and Companion agents."""
 
 import sys
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
-from google.adk.events import Event
-from google.adk.utils.context_utils import Aclosing
 from google.adk.agents.parallel_agent import (
     _merge_agent_run,
     _merge_agent_run_pre_3_11,
 )
+from google.adk.events import Event
+from google.adk.utils.context_utils import Aclosing
 
-from app.schemas.agent_outputs import RouteDecision, GuardianDecision, RouteType, CardSetProposal
+from app.agents.guardian_agent import GuardianAgent
 from app.core.constants import GuardianDecisionType
+from app.schemas.agent_outputs import CardSetProposal, GuardianDecision, RouteDecision, RouteType
 
 
 def _create_branch_ctx(
@@ -37,7 +39,7 @@ class OrchestratorAgent(BaseAgent):
     description: str = "Root orchestrator agent managing conversation turns."
 
     router: BaseAgent
-    guardian: BaseAgent
+    guardian: GuardianAgent
     companion: BaseAgent
 
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
@@ -79,9 +81,14 @@ class OrchestratorAgent(BaseAgent):
         route = RouteDecision.model_validate(route_dict)
         guardian_decision = GuardianDecision.model_validate(guardian_dict)
 
-        # short-circuit: if Guardian fail-closes (privacy/injection), do NOT call Companion LLM at all
-        if guardian_decision.decision is GuardianDecisionType.BLOCK:
-            yield Event(author=self.name, message="Guardian blocked turn. Short-circuiting.")
+        # short-circuit: if Guardian fail-closes (privacy/injection),
+        # do NOT call Companion LLM at all
+        if guardian_decision.decision == GuardianDecisionType.BLOCK:
+            msg = (
+                f"Guardian fail-closed turn with {guardian_decision.decision}. "
+                "Short-circuiting."
+            )
+            yield Event(author=self.name, message=msg)
             return
 
         # Check if route doesn't invoke Companion (e.g. passive translation or privacy risk)
@@ -100,7 +107,10 @@ class OrchestratorAgent(BaseAgent):
         proposal_dict = ctx.session.state.get("companion_proposal")
         if proposal_dict:
             proposal = CardSetProposal.model_validate(proposal_dict)
-            # Review cards deterministically (we can call review_cards method on the guardian agent instance)
-            card_review = getattr(self.guardian, "review_cards")(proposal.card_set)
+            # Review cards deterministically (we call review_cards on the guardian agent instance)
+            card_review = await self.guardian.review_cards(proposal.card_set)
             ctx.session.state["card_review"] = card_review.model_dump()
-            yield Event(author=self.guardian.name, message=f"Card review decision: {card_review.decision}")
+            yield Event(
+                author=self.guardian.name,
+                message=f"Card review decision: {card_review.decision}",
+            )
