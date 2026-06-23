@@ -130,6 +130,17 @@ class TurnOrchestrator:
                 self._cards.register_card_set(proposal.card_set, context)
             return TurnOutcome(route, guardian, proposal, card_review)
 
+        async with asyncio.TaskGroup() as tg:
+            router_task = tg.create_task(self._router.route(event))
+            guardian_task = tg.create_task(self._guardian.review_turn(event))
+        route = router_task.result()
+        guardian = guardian_task.result()
+        if guardian.decision is GuardianDecisionType.BLOCK:
+            return TurnOutcome(route, guardian, None, None)
+        no_companion_routes = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
+        if route.route_type in no_companion_routes:
+            return TurnOutcome(route, guardian, None, None)
+
         # 1. Instantiate the ADK session and runner
         session_service = InMemorySessionService()  # type: ignore[no-untyped-call]
         mcp_adapter = self._mcp_tool_adapter_factory(context)
@@ -209,9 +220,12 @@ class TurnOrchestrator:
         session_id = str(event.session_id)
 
         # Initialize the session
-        await session_service.get_session(
+        session = await session_service.get_session(
             app_name="agents", user_id=user_id, session_id=session_id
         )
+        assert session is not None
+        session.state["route_decision"] = route.model_dump()
+        session.state["guardian_decision"] = guardian.model_dump()
 
         runner = Runner(
             app_name="agents",
@@ -247,8 +261,8 @@ class TurnOrchestrator:
         proposal_data = session.state.get("companion_proposal")
         card_review_data = session.state.get("card_review")
 
-        if not route_data or not guardian_data:
-            raise ValueError("ROUTER_UNAVAILABLE")
+        route_data = route_data or route.model_dump()
+        guardian_data = guardian_data or guardian.model_dump()
 
         route = RouteDecision.model_validate(route_data)
         guardian = GuardianDecision.model_validate(guardian_data)
