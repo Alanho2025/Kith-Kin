@@ -70,7 +70,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private sequence = 1;
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
-    this.fetchFn = options.fetchFn ?? fetch;
+    this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
     this.socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
     this.baseUrl = (options.baseUrl ?? globalThis.location.origin).replace(/\/$/, "");
   }
