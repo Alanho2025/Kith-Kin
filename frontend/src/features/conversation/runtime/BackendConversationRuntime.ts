@@ -5,6 +5,8 @@ import type {
   ConversationRuntimeEvent,
   RuntimeCommandView,
 } from "../viewModels";
+import { AudioPlayer } from "./AudioPlayer";
+import { AudioRecorder } from "./AudioRecorder";
 
 
 const envelopeSchema = z
@@ -68,6 +70,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private socket: RuntimeSocket | null = null;
   private sessionId = "";
   private sequence = 1;
+  private audioRecorder: AudioRecorder | null = null;
+  private audioPlayer: AudioPlayer | null = null;
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
     this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
@@ -87,15 +91,29 @@ export class BackendConversationRuntime implements ConversationRuntime {
     socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onmessage = (message) => this.handleMessage(message);
+
+    this.audioPlayer = new AudioPlayer();
+    this.audioPlayer.start();
+
+    this.audioRecorder = new AudioRecorder();
+
     await new Promise<void>((resolve, reject) => {
       socket.onopen = () => resolve();
       socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
+    });
+
+    await this.audioRecorder.start((pcm) => {
+      this.socket?.send(pcm);
     });
   }
 
   disconnect(): Promise<void> {
     this.socket?.close();
     this.socket = null;
+    this.audioRecorder?.stop();
+    this.audioRecorder = null;
+    this.audioPlayer?.stop();
+    this.audioPlayer = null;
     return Promise.resolve();
   }
 
@@ -121,7 +139,16 @@ export class BackendConversationRuntime implements ConversationRuntime {
   }
 
   private handleMessage(message: MessageEvent): void {
-    if (typeof message.data !== "string") return;
+    if (typeof message.data !== "string") {
+      if (message.data instanceof ArrayBuffer) {
+        this.audioPlayer?.play(message.data);
+      } else if (message.data instanceof Blob) {
+        message.data.arrayBuffer().then((buf) => {
+          this.audioPlayer?.play(buf);
+        });
+      }
+      return;
+    }
     const envelope = envelopeSchema.parse(JSON.parse(message.data));
     const event: ConversationRuntimeEvent = {
       schemaVersion: envelope.schema_version,
@@ -133,6 +160,17 @@ export class BackendConversationRuntime implements ConversationRuntime {
       correlationId: envelope.correlation_id,
       payload: camelize(envelope.payload),
     };
+
+    if (event.eventType === "audio.muted") {
+      const payloadObj = event.payload as Record<string, unknown> | null;
+      const isMuted = payloadObj?.muted;
+      if (isMuted) {
+        this.audioRecorder?.pause();
+      } else {
+        this.audioRecorder?.resume();
+      }
+    }
+
     for (const listener of this.listeners) listener(event);
   }
 }

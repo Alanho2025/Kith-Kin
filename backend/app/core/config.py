@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     deployment_mode: str = "local"
-    live_transport: Literal["backend_proxy"] = "backend_proxy"
+    live_transport: Literal["backend_proxy", "gemini_live"] = "backend_proxy"
     session_store: Literal["sqlite"] = "sqlite"
     mcp_transport: Literal["stdio"] = "stdio"
     notification_provider: Literal["stub"] = "stub"

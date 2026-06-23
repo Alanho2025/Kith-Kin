@@ -18,6 +18,7 @@ from app.db.models.allergy import Allergy  # noqa: E402
 from app.db.models.medication import Medication  # noqa: E402
 from app.db.models.user import User  # noqa: E402
 from app.db.models.visit_summary import VisitSummary  # noqa: E402
+from app.db.models.session import Session  # noqa: E402
 from app.db.models.drug_knowledge_entity import DrugKnowledgeEntity  # noqa: E402
 from app.db.models.drug_interaction_rule import DrugInteractionRule  # noqa: E402
 from app.db.session import create_engine, create_session_factory, initialize_database  # noqa: E402
@@ -42,6 +43,7 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
             await session.execute(delete(VisitSummary).where(VisitSummary.user_id == DEMO_USER_ID))
             await session.execute(delete(Allergy).where(Allergy.user_id == DEMO_USER_ID))
             await session.execute(delete(Medication).where(Medication.user_id == DEMO_USER_ID))
+            await session.execute(delete(Session).where(Session.user_id == DEMO_USER_ID))
             await session.execute(delete(User).where(User.id == DEMO_USER_ID))
             await session.execute(delete(DrugKnowledgeEntity))
             await session.execute(delete(DrugInteractionRule))
@@ -56,6 +58,15 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
                 family_contact_label="Adult child",
                 created_at=NOW,
                 updated_at=NOW,
+            )
+        )
+        await session.merge(
+            Session(
+                id=DEMO_SESSION_ID,
+                user_id=DEMO_USER_ID,
+                encounter_type="pharmacy",
+                status="created",
+                created_at=NOW,
             )
         )
         await session.merge(
