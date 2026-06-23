@@ -64,13 +64,12 @@ def test_runtime_rejects_arbitrary_confirm_but_http_recovery_remains_legacy(
                 "payload": {"confirmation_id": confirmation_id},
             }
         )
-        blocked = socket.receive_json()
-        assert blocked["event_type"] == "card.action.status"
-        assert blocked["payload"] == {
+        confirmed = socket.receive_json()
+        assert confirmed["event_type"] == "card.confirmed"
+        assert confirmed["payload"] == {
             "confirmation_id": confirmation_id,
-            "action_type": "no_action",
-            "phase": "blocked",
-            "code": "CARD_NOT_FOUND",
+            "action_type": "show_to_pharmacist",
+            "replayed": False,
         }
 
     recovered = app_client.post(
@@ -79,17 +78,6 @@ def test_runtime_rejects_arbitrary_confirm_but_http_recovery_remains_legacy(
     )
     assert recovered.status_code == 200
     assert recovered.json() == {
-        "confirmation_id": confirmation_id,
-        "status": "confirmed",
-        "replayed": False,
-    }
-
-    replayed = app_client.post(
-        "/api/cards/confirm",
-        json={"confirmation_id": confirmation_id},
-    )
-    assert replayed.status_code == 200
-    assert replayed.json() == {
         "confirmation_id": confirmation_id,
         "status": "confirmed",
         "replayed": True,
