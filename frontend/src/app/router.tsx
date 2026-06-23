@@ -13,7 +13,7 @@ export function AppRouter() {
 
   const runtime = useMemo(() => {
     if (isMock) {
-      return new MockConversationRuntime(mockPharmacyFlow);
+      return new MockConversationRuntime(mockPharmacyFlow, 1500);
     } else {
       return new BackendConversationRuntime();
     }
