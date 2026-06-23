@@ -731,21 +731,8 @@ class LiveRuntimeService:
             )
             await websocket.send_json(confirmed)
 
-            if outcome.phase == "succeeded" or outcome.action_type.value in ("speak", "notify_family", "save_memory"):
-                muted_evt = self._append_event(
-                    session_id,
-                    "audio.muted",
-                    {"muted": True, "reason": "tts_playback"}
-                )
-                await websocket.send_json(muted_evt)
-                
-                speaking_evt = self._append_event(
-                    session_id,
-                    "audio.speaking",
-                    {"phase": "started", "card_id": card.card_id}
-                )
-                await websocket.send_json(speaking_evt)
-                await port.send_text(card.en_text)
+            # Live Translate only accepts audio input and cannot voice arbitrary
+            # text. Response-card speech must use a separate TTS/agent channel.
 
 
 def _string_field(event: dict[str, Any], field: str) -> str:

@@ -33,7 +33,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
         self._queue: asyncio.Queue[ProviderLiveEvent | None] = asyncio.Queue()
         self._closed = False
         self._current_utterance_id = f"utt_{uuid4()}"
-        self._revision = 1
+        self._input_revision = 1
+        self._output_revision = 1
         self._read_task = asyncio.create_task(self._read_loop())
 
     async def send_audio(self, frame: bytes) -> None:
@@ -42,7 +43,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
         try:
             from google.genai import types
             await self._session.send_realtime_input(
-                media=types.Blob(data=frame, mime_type="audio/pcm;rate=16000")
+                audio=types.Blob(data=frame, mime_type="audio/pcm;rate=16000")
             )
         except Exception as e:
             logger.warning(f"Error sending audio frame to Gemini Live: {e}")
@@ -55,19 +56,6 @@ class GeminiLiveSessionPort(LiveSessionPort):
                         retryable=True,
                     )
                 )
-
-    async def send_text(self, text: str) -> None:
-        """Send English response text to be voiced in the Live Translate session."""
-        if self._closed:
-            return
-        try:
-            from google.genai import types
-            await self._session.send_client_content(
-                turns=types.Content(role="user", parts=[types.Part(text=text)]),
-                turn_complete=True,
-            )
-        except Exception as e:
-            logger.warning(f"Error sending text content to Gemini Live: {e}")
 
     def events(self) -> AsyncIterator[ProviderLiveEvent]:
         async def event_generator() -> AsyncIterator[ProviderLiveEvent]:
@@ -139,17 +127,16 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     "speaker": "pharmacist",
                     "language": "en",
                     "text": text,
-                    "revision": self._revision,
+                    "revision": self._input_revision,
                     "final": finished,
                 }
                 event = GeminiLiveAdapter.map_provider_message(flat_msg)
                 await self._queue.put(event)
                 
                 if finished:
-                    self._current_utterance_id = f"utt_{uuid4()}"
-                    self._revision = 1
+                    self._input_revision = 1
                 else:
-                    self._revision += 1
+                    self._input_revision += 1
 
             # Chinese translated output transcript (translated subtitles)
             if content.output_transcription:
@@ -162,11 +149,15 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     "speaker": "pharmacist",
                     "language": "zh",
                     "text": text,
-                    "revision": 1,
+                    "revision": self._output_revision,
                     "final": finished,
                 }
                 event = GeminiLiveAdapter.map_provider_message(flat_msg)
                 await self._queue.put(event)
+                if finished:
+                    self._output_revision = 1
+                else:
+                    self._output_revision += 1
 
             # Chinese generated audio
             if content.model_turn and content.model_turn.parts:
@@ -183,6 +174,22 @@ class GeminiLiveSessionPort(LiveSessionPort):
                             }
                             event = GeminiLiveAdapter.map_provider_message(flat_msg)
                             await self._queue.put(event)
+
+            if content.turn_complete:
+                await self._queue.put(
+                    ProviderTranscriptEvent(
+                        event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+                        provider_event_id=f"evt_{uuid4()}",
+                        utterance_id="turn_complete",
+                        speaker="unknown",
+                        language="unknown",
+                        text="",
+                        revision=1,
+                    )
+                )
+                self._current_utterance_id = f"utt_{uuid4()}"
+                self._input_revision = 1
+                self._output_revision = 1
 
 
 class GeminiLiveAdapter(GeminiLiveGateway):
@@ -211,6 +218,10 @@ class GeminiLiveAdapter(GeminiLiveGateway):
                 response_modalities=["AUDIO"],
                 input_audio_transcription=types.AudioTranscriptionConfig(),
                 output_audio_transcription=types.AudioTranscriptionConfig(),
+                translation_config=types.TranslationConfig(
+                    target_language_code="zh-Hans",
+                    echo_target_language=False,
+                ),
             )
             
             # Connect using gemini-3.5-live-translate-preview

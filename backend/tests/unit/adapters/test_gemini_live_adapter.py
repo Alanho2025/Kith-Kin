@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from google.genai import types
 
-from app.adapters.gemini_live_adapter import GeminiLiveAdapter
+from app.adapters.gemini_live_adapter import GeminiLiveAdapter, GeminiLiveSessionPort
 from app.adapters.provider_schemas import (
     LiveSessionContext,
     ProviderAudioEvent,
@@ -97,6 +97,9 @@ async def test_open_session_connects_to_gemini_live() -> None:
 
         port = await adapter.open_session(context)
         assert port is not None
+        config = mock_client.aio.live.connect.call_args.kwargs["config"]
+        assert config.translation_config.target_language_code == "zh-Hans"
+        assert config.translation_config.echo_target_language is False
 
         # Verify send_audio
         await port.send_audio(b"\x00\x01")
@@ -114,3 +117,70 @@ async def test_open_session_connects_to_gemini_live() -> None:
         # Verify close
         await port.close()
         mock_connect_cm.__aexit__.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_output_transcript_keeps_input_utterance_id_until_output_finishes() -> None:
+    session = AsyncMock()
+    session.receive = MagicMock()
+    session.receive.return_value = _never_receive()
+    port = GeminiLiveSessionPort(AsyncMock(), session)
+
+    await port._process_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                input_transcription=types.Transcription(
+                    text="How are you?",
+                    finished=True,
+                    language_code="en",
+                )
+            )
+        )
+    )
+    input_event = await anext(port.events())
+
+    await port._process_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                output_transcription=types.Transcription(
+                    text="你好吗？",
+                    finished=True,
+                    language_code="zh-Hans",
+                )
+            )
+        )
+    )
+    output_event = await anext(port.events())
+
+    assert isinstance(input_event, ProviderTranscriptEvent)
+    assert isinstance(output_event, ProviderTranscriptEvent)
+    assert output_event.utterance_id == f"{input_event.utterance_id}_zh"
+    assert output_event.language == "zh"
+
+    await port.close()
+
+
+@pytest.mark.anyio
+async def test_turn_complete_emits_a_completion_event() -> None:
+    session = AsyncMock()
+    session.receive = MagicMock()
+    session.receive.return_value = _never_receive()
+    port = GeminiLiveSessionPort(AsyncMock(), session)
+
+    await port._process_message(
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(turn_complete=True)
+        )
+    )
+    event = await anext(port.events())
+
+    assert isinstance(event, ProviderTranscriptEvent)
+    assert event.utterance_id == "turn_complete"
+    assert event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+
+    await port.close()
+
+
+async def _never_receive():
+    if False:
+        yield None

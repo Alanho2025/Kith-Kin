@@ -1,3 +1,5 @@
+import { PcmFrameBuffer } from "./PcmFrameBuffer";
+
 const isBrowser =
   typeof window !== "undefined" &&
   typeof window.AudioContext !== "undefined" &&
@@ -18,6 +20,7 @@ export class AudioRecorder {
 
     this.socketSend = sendFn;
     this.isPaused = false;
+    const frameBuffer = new PcmFrameBuffer(sendFn);
 
     try {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -36,9 +39,7 @@ export class AudioRecorder {
         if (this.isPaused || !this.socketSend) return;
         const inputData = e.inputBuffer.getChannelData(0);
         const pcmData = this.downsampleAndConvert(inputData, inputRate, targetRate);
-        const frame = new ArrayBuffer(pcmData.byteLength);
-        new Int16Array(frame).set(pcmData);
-        this.socketSend(frame);
+        frameBuffer.push(pcmData);
       };
 
       this.sourceNode.connect(this.processorNode);
