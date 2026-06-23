@@ -130,6 +130,18 @@ class CardService:
             if record.user_id == context.user_id:
                 self._repository.update(replace(record, state="cancelled"))
 
+    def get_card_by_confirmation(self, confirmation_id: str) -> ResponseCard | None:
+        record = self._repository.get(confirmation_id)
+        if record is None:
+            return None
+        card_set = self._card_sets.get((str(record.session_id), record.card_set_id))
+        if card_set is None:
+            return None
+        try:
+            return _find_card(card_set, record.card_id)
+        except Exception:
+            return None
+
 def _find_card(card_set: CardSet, card_id: str) -> ResponseCard:
     for card in card_set.cards:
         if card.card_id == card_id:

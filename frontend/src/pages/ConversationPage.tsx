@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BottomControls } from "../components/BottomControls";
 import { ConfirmationSheet } from "../components/ConfirmationSheet";
 import { GuardianWarningCard } from "../components/GuardianWarningCard";
@@ -13,10 +14,13 @@ import type { RuntimeCommandView } from "../features/conversation/viewModels";
 export interface ConversationPageProps {
   runtime: ConversationRuntime;
   sessionId: string;
+  isMock?: boolean;
 }
 
-export function ConversationPage({ runtime, sessionId }: ConversationPageProps) {
+export function ConversationPage({ runtime, sessionId, isMock = false }: ConversationPageProps) {
   const { state, sendCommand, dismissConfirmation } = useLiveConversation(runtime, sessionId);
+  const [inputText, setInputText] = useState("");
+
   const { selectCard, confirm, cancel } = useCardConfirmation(
     state.activeCardSet,
     state.confirmation,
@@ -30,6 +34,22 @@ export function ConversationPage({ runtime, sessionId }: ConversationPageProps) 
   const selfSpeak = () => {
     dismissConfirmation();
     void sendCommand({ eventType: "control.self_speak", payload: {} });
+  };
+
+  const handleSendText = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim()) return;
+    void sendCommand({
+      eventType: "transcript.final",
+      payload: {
+        utteranceId: `utt-${Date.now()}`,
+        speaker: "pharmacist",
+        language: "en",
+        text: inputText.trim(),
+        revision: 1,
+      },
+    });
+    setInputText("");
   };
 
   return (
@@ -48,6 +68,24 @@ export function ConversationPage({ runtime, sessionId }: ConversationPageProps) 
         </aside>
         <div className="flex min-h-[calc(100vh-5rem)] flex-col bg-white">
           <div className="flex-1 space-y-6 px-5 py-7 sm:px-8 lg:px-12 lg:py-10">
+            {!isMock && (
+              <form onSubmit={handleSendText} className="mb-6 flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  placeholder="🔬 测试输入：模拟药剂师的英文发言（例如：Do you have any drug allergies?）"
+                  className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <button
+                  type="submit"
+                  className="rounded-xl bg-teal-700 px-6 py-2 text-lg font-bold text-white hover:bg-teal-800 transition focus:outline-none focus:ring-2 focus:ring-teal-300"
+                >
+                  发送
+                </button>
+              </form>
+            )}
+
             <TwoLayerSubtitle
               partialEnglish={state.partialEnglish}
               chineseSegments={state.chineseSegments}
