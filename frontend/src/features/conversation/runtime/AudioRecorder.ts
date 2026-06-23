@@ -36,7 +36,9 @@ export class AudioRecorder {
         if (this.isPaused || !this.socketSend) return;
         const inputData = e.inputBuffer.getChannelData(0);
         const pcmData = this.downsampleAndConvert(inputData, inputRate, targetRate);
-        this.socketSend(pcmData.buffer);
+        const frame = new ArrayBuffer(pcmData.byteLength);
+        new Int16Array(frame).set(pcmData);
+        this.socketSend(frame);
       };
 
       this.sourceNode.connect(this.processorNode);
