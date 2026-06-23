@@ -110,7 +110,9 @@ export class BackendConversationRuntime implements ConversationRuntime {
       return;
     }
     await this.audioRecorder.start((pcm) => {
-      this.socket?.send(pcm);
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(pcm);
+      }
     });
   }
 
