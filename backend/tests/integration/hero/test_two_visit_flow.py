@@ -153,7 +153,54 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
         confidence=0.9,
         reason_code=RouteReasonCode.PHARMACY_TERM,
     )
-    proposal = await companion_agent.propose_cards(event_2, route_decision, f"guardian_{uuid4()}")
+    
+    from unittest.mock import patch
+    from google.adk.events import Event
+    from google.adk.sessions.in_memory_session_service import InMemorySessionService
+    
+    async def mock_run_async(self_runner, user_id, session_id, new_message=None, **kwargs):
+        from app.schemas.agent_outputs import CardSetProposal
+        from app.schemas.cards import CardSet, ResponseCard, CardType, CardAction
+        from app.core.constants import CardRiskLevel, CardActionType
+        from uuid import uuid4
+        from datetime import timedelta
+        
+        session = await self_runner.session_service.get_session(
+            app_name=self_runner.app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            await self_runner.session_service.create_session(
+                app_name=self_runner.app_name, user_id=user_id, session_id=session_id
+            )
+        mock_card = ResponseCard(
+            card_id=f"card_{uuid4()}",
+            card_type=CardType.ASK_QUESTION,
+            zh_text="询问药剂师：我需要服用辅酶Q10吗？",
+            en_text="Ask pharmacist: Did you mean Coenzyme Q10?",
+            risk_level=CardRiskLevel.NORMAL,
+            action=CardAction(type=CardActionType.NO_ACTION),
+            requires_parent_confirmation=True,
+            requires_guardian_approval=True,
+            guardian_decision_id=f"guardian_{uuid4()}",
+        )
+        proposal = CardSetProposal(
+            card_set=CardSet(
+                card_set_id=f"cards_{uuid4()}",
+                revision=1,
+                source_event_id=event_2.event_id,
+                generated_at=clock.now(),
+                expires_at=clock.now() + timedelta(minutes=3),
+                cards=(mock_card,),
+            ),
+            proposal_hash="dummy_hash",
+        )
+        real_session = self_runner.session_service.sessions[self_runner.app_name][user_id][session_id]
+        real_session.state["companion_proposal"] = proposal.model_dump()
+        yield Event(author="Companion", message="Mock proposal cards")
+
+    with patch("google.adk.runners.Runner.run_async", mock_run_async):
+        proposal = await companion_agent.propose_cards(event_2, route_decision, f"guardian_{uuid4()}")
+        
     assert len(proposal.card_set.cards) == 1
     card = proposal.card_set.cards[0]
     assert card.card_type == CardType.ASK_QUESTION

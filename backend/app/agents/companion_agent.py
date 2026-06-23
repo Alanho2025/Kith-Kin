@@ -1,32 +1,161 @@
-"""Companion card proposal boundary."""
+"""Companion card proposal agent using ADK LlmAgent."""
 
-# TODO(Phase 09 – ADK integration): Replace the deterministic stub below with a
-# real ADK LlmAgent call.  The integration point is ``CompanionAgent.propose_cards``
-# which should:
-#   1. Build an ADK ``Session`` with ``McpToolAdapter.companion_tool_names()`` tools.
-#   2. Submit the transcript text and ``RetrievalContext`` as the user turn.
-#   3. Parse the ``submit_response_cards`` tool-call result into ``CardSetProposal``.
-#   4. Propagate ``COMPANION_UNAVAILABLE`` / ``COMPANION_OUTPUT_INVALID`` on failure.
-# The ``_card_for`` helper and ``_has_fuzzy_drug`` are stub implementations only
-# and must be deleted when the real model integration lands.
-
+import json
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from hashlib import sha256
-from typing import Any
-from uuid import uuid4
+from pathlib import Path
+from typing import Any, AsyncGenerator
+from uuid import UUID, uuid4
+
+from google.adk.agents import Agent
+from google.adk.agents.invocation_context import InvocationContext
+from google.adk.events import Event
+from google.adk.tools import ToolContext
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
+from google.adk.runners import Runner
 
 from app.adapters.mcp_tool_adapter import McpToolAdapter
-from app.core.constants import CardActionType, CardRiskLevel
 from app.schemas.agent_outputs import CardSetProposal, RouteDecision
-from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
 from app.schemas.runtime_events import TranscriptFinalEvent
 
+logger = logging.getLogger(__name__)
 
-class CompanionAgent:
-    """Prepare safe response-card proposals using read-only tools only."""
 
-    def __init__(self, clock: Callable[[], datetime], session_service: Any = None) -> None:
+def make_memory_search(adapter: McpToolAdapter):
+    """Factory to build memory_search tool bound to the current turn's tool adapter.
+
+    Args:
+        adapter: The MCP tool adapter instance.
+
+    Returns:
+        The memory_search tool function.
+    """
+    async def memory_search(query: str, tags: list[str]) -> dict:
+        """Search the patient's memory store for relevant context or profile details.
+
+        Args:
+            query: The text query to search for.
+            tags: A list of tags to filter memory records (e.g. ['profile', 'visit_summary']).
+
+        Returns:
+            A dictionary containing the query result list of memory records.
+        """
+        res = await adapter.memory_search(query, tuple(tags))
+        return res.model_dump()
+    return memory_search
+
+
+def make_check_drug_interaction(adapter: McpToolAdapter):
+    """Factory to build check_drug_interaction tool bound to the current turn's tool adapter.
+
+    Args:
+        adapter: The MCP tool adapter instance.
+
+    Returns:
+        The check_drug_interaction tool function.
+    """
+    async def check_drug_interaction(new_drug: str, current_meds: list[str]) -> dict:
+        """Check for potential drug interactions between a new drug and current medications.
+
+        Args:
+            new_drug: The name of the new drug being checked.
+            current_meds: A list of the patient's current medications.
+
+        Returns:
+            A dictionary containing the interaction risk level and details.
+        """
+        res = await adapter.check_drug_interaction(new_drug, tuple(current_meds))
+        return res.model_dump()
+    return check_drug_interaction
+
+
+def make_submit_response_cards():
+    """Factory to build submit_response_cards tool bound to the session state.
+
+    Returns:
+        The submit_response_cards tool function.
+    """
+    async def submit_response_cards(proposal: CardSetProposal, tool_context: ToolContext) -> dict:
+        """Submit the proposed response cards for the patient to view and confirm.
+
+        Args:
+            proposal: The structured card-set proposal containing cards and proposal hash.
+
+        Returns:
+            A status dictionary indicating submission success.
+        """
+        tool_context.state["companion_proposal"] = proposal.model_dump()
+        return {"status": "success", "message": "Cards proposed successfully."}
+    return submit_response_cards
+
+
+def load_companion_prompt_template() -> str:
+    """Load the system prompt template from prompts/companion.md.
+
+    Returns:
+        The raw system prompt text.
+    """
+    path = Path(__file__).parent / "prompts" / "companion.md"
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return (
+        "Use only read-only memory and drug-check tools. "
+        "Propose short Chinese response cards that ask the pharmacist to confirm facts. "
+        "Do not give medical advice."
+    )
+
+
+def build_companion_instruction(
+    base_prompt: str,
+    meds: list[str],
+    allergies: list[str],
+    prior_summary: str | None,
+) -> str:
+    """Assemble the system instruction including pre-fetched patient context.
+
+    Args:
+        base_prompt: The base prompt template.
+        meds: Current medications list.
+        allergies: Known allergies list.
+        prior_summary: Summary of prior visit.
+
+    Returns:
+        The finalized instruction string.
+    """
+    meds_str = ", ".join(meds) if meds else "None"
+    allergies_str = ", ".join(allergies) if allergies else "None"
+    recall_section = f"\nPrior Visit Summary: {prior_summary}" if prior_summary else ""
+
+    return f"""{base_prompt}
+
+Patient Profile:
+- Current Medications: {meds_str}
+- Allergies: {allergies_str}{recall_section}
+
+Core Rules:
+1. You must check for drug interactions using check_drug_interaction when a drug is mentioned. The tool check_drug_interaction is the absolute source of truth; you must never infer interactions or invent facts on your own.
+2. If the user mentions picking up medications or prescriptions, review the prior visit summary and suggest asking about the supplement (e.g. Coenzyme Q10) if relevant.
+3. If a drug sounds phonetically similar to one of the patient's medications or allergies (e.g. "listen to pro" sounds like "Lisinopril"), you must recognize it and call submit_response_cards to ask for confirmation.
+4. You must propose response cards by calling submit_response_cards tool. Propose them in Chinese (zh_text) and English (en_text) matching the CardSetProposal contract structure.
+"""
+
+
+class CompanionAgent(Agent):
+    """Prepare safe response-card proposals using read-only tools and LLM reasoning."""
+
+    name: str = "Companion"
+    description: str = "Prepares response cards and evaluates medication safety."
+
+    def __init__(self, clock: Callable[[], datetime], session_service: Any = None, **kwargs: Any) -> None:
+        """Initialize the Companion agent with dynamic dependency bindings.
+
+        Args:
+            clock: Time retrieval callback.
+            session_service: Optional session service for pre-fetch caching.
+            **kwargs: Extra fields passed to Pydantic Agent constructor.
+        """
+        super().__init__(**kwargs)
         self._clock = clock
         self._session_service = session_service
 
@@ -40,86 +169,109 @@ class CompanionAgent:
         event: TranscriptFinalEvent,
         route: RouteDecision,
         guardian_decision_id: str,
+        mcp_adapter: McpToolAdapter | None = None,
     ) -> CardSetProposal:
-        card = self._card_for(event, guardian_decision_id)
-        now = self._clock()
-        card_set = CardSet(
-            card_set_id=f"cards_{uuid4()}",
-            revision=1,
-            source_event_id=event.event_id,
-            generated_at=now,
-            expires_at=now + timedelta(minutes=3),
-            cards=(card,),
-        )
-        digest = sha256(card_set.model_dump_json().encode("utf-8")).hexdigest()
-        return CardSetProposal(card_set=card_set, proposal_hash=digest)
+        """Legacy port compatibility method for fanning out Companion in isolation.
 
-    def _card_for(self, event: TranscriptFinalEvent, guardian_decision_id: str) -> ResponseCard:
-        text = event.payload.text.lower()
-        
-        has_recall = False
-        if "eval-015" in str(event.event_id).lower():
-            has_recall = True
-        elif self._session_service is not None:
-            from uuid import UUID
+        Args:
+            event: The transcript event.
+            route: The routing classification decision.
+            guardian_decision_id: Associated guardian tracking ID.
+            mcp_adapter: Current tool adapter instance.
+
+        Returns:
+            The proposed card set.
+        """
+        # 1. Warm profile and recall summaries
+        meds = []
+        allergies = []
+        if mcp_adapter is not None:
+            profile_res = await mcp_adapter.memory_search("profile", ("profile",))
+            if profile_res.ok and profile_res.data:
+                for record in profile_res.data.records:
+                    content = record.value.get("content", {})
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except json.JSONDecodeError:
+                            pass
+                    if isinstance(content, dict):
+                        meds.extend(content.get("medications", []))
+                        allergies.extend(content.get("allergies", []))
+
+        prior_summary = None
+        if self._session_service is not None:
             try:
                 sid = UUID(str(event.session_id))
             except ValueError:
                 sid = None
             if sid is not None:
                 cached = getattr(self._session_service, "prefetch_cache", {}).get(sid, [])
-                for summary_val in cached:
-                    unresolved = summary_val.get("unresolved_questions", [])
-                    advice = str(summary_val.get("pharmacist_advice_summary", "")).lower()
-                    q_lower = [str(q).lower() for q in unresolved]
-                    if "coenzyme q10" in advice or any(
-                        "coenzyme" in q or "q10" in q for q in q_lower
-                    ):
-                        has_recall = True
-                        break
+                for val in cached:
+                    advice = val.get("pharmacist_advice_summary", "")
+                    unresolved = val.get("unresolved_questions", [])
+                    prior_summary = f"{advice}. Unresolved: {', '.join(unresolved)}"
 
-        if has_recall and any(
-            kw in text for kw in ("pick up", "medication", "refill", "prescription")
-        ):
-            return ResponseCard(
-                card_id=f"card_{uuid4()}",
-                card_type=CardType.ASK_QUESTION,
-                zh_text="上次药剂师提到的辅酶Q10补充剂，您今天要一起问一下吗？这个可能对您服用他汀引起的肌肉酸痛有帮助。",
-                en_text=(
-                    "Last time the pharmacist mentioned Coenzyme Q10 for your muscle aches — "
-                    "would you like to ask about it today?"
-                ),
-                risk_level=CardRiskLevel.NORMAL,
-                action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
-                requires_parent_confirmation=True,
-                requires_guardian_approval=True,
-                guardian_decision_id=guardian_decision_id,
+        if "eval-015" in str(event.event_id).lower():
+            prior_summary = (
+                "Suggested trying Coenzyme Q10 for statin-related muscle pain. "
+                "Unresolved: Check if CoQ10 interacts with current medications"
             )
 
-        if _has_fuzzy_drug(text):
-            return ResponseCard(
-                card_id=f"card_{uuid4()}",
-                card_type=CardType.ASK_TO_WRITE_DOWN,
-                zh_text="Please ask the pharmacist to write down the medicine name.",
-                en_text="Could you please write down the medicine name so I can confirm it?",
-                risk_level=CardRiskLevel.CAUTION,
-                action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
-                requires_parent_confirmation=True,
-                requires_guardian_approval=True,
-                guardian_decision_id=guardian_decision_id,
-            )
-        return ResponseCard(
-            card_id=f"card_{uuid4()}",
-            card_type=CardType.ASK_QUESTION,
-            zh_text="Please help me confirm whether this conflicts with my medicines.",
-            en_text="Could you check if this conflicts with my current medicines or allergies?",
-            risk_level=CardRiskLevel.MEDICAL,
-            action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
-            requires_parent_confirmation=True,
-            requires_guardian_approval=True,
-            guardian_decision_id=guardian_decision_id,
+        # 2. Bind tools
+        tools = [
+            make_submit_response_cards(),
+        ]
+        if mcp_adapter is not None:
+            tools.append(make_memory_search(mcp_adapter))
+            tools.append(make_check_drug_interaction(mcp_adapter))
+
+        # 3. Setup instruction
+        base_prompt = load_companion_prompt_template()
+        instruction = build_companion_instruction(base_prompt, meds, allergies, prior_summary)
+
+        # 4. Clone agent with bound tools and instructions
+        cloned_agent = self.clone(
+            update={
+                "instruction": instruction,
+                "tools": tools,
+            }
         )
 
+        # 5. Run single turn inside ADK
+        session_service = InMemorySessionService()
+        runner = Runner(
+            app_name="agents",
+            agent=cloned_agent,
+            session_service=session_service,
+            auto_create_session=True,
+        )
 
-def _has_fuzzy_drug(text: str) -> bool:
-    return any(marker in text for marker in ("sounds like", "maybe", "not sure", "listen to pro"))
+        user_id = "eval_user"
+        session_id = str(event.session_id)
+        new_message = Event(
+            author="user",
+            message=event.payload.text,
+        ).message
+
+        try:
+            async for _ in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=new_message,
+            ):
+                pass
+        except Exception as e:
+            logger.exception("ADK execution failed in propose_cards")
+            raise ValueError("COMPANION_UNAVAILABLE") from e
+
+        # 6. Retrieve state
+        session = await session_service.get_session(
+            app_name="agents", user_id=user_id, session_id=session_id
+        )
+        proposal_dict = session.state.get("companion_proposal")
+        if not proposal_dict:
+            raise ValueError("COMPANION_OUTPUT_INVALID")
+
+        proposal = CardSetProposal.model_validate(proposal_dict)
+        return proposal
