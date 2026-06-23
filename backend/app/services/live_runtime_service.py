@@ -164,6 +164,23 @@ class LiveRuntimeService:
             event = parse_runtime_event(json.loads(text))
         except (ValueError, json.JSONDecodeError):
             return
+        if isinstance(event, TranscriptFinalEvent):
+            from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
+            provider_event = ProviderTranscriptEvent(
+                event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+                provider_event_id=event.event_id,
+                utterance_id=event.payload.utterance_id,
+                speaker=event.payload.speaker,
+                language=event.payload.language,
+                text=event.payload.text,
+                revision=event.payload.revision,
+            )
+            provider_outcomes = await self._handle_transcript_provider_event(
+                session_id, provider_event
+            )
+            for provider_outcome in provider_outcomes:
+                await websocket.send_json(provider_outcome)
+            return
         if self._command_service is not None:
             outcomes = await self._command_service.handle(event, session_id=session_id)
             for outcome in outcomes:
