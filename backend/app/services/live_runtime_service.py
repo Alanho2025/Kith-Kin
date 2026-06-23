@@ -49,6 +49,8 @@ class LiveRuntimeService:
         command_service: RuntimeCommandService | None = None,
         turn_orchestrator: TurnOrchestrator | None = None,
         user_id: UUID | None = None,
+        live_gateway: Any = None,
+        settings: Any = None,
     ) -> None:
         self._cards = card_service
         self._fake_live = fake_live
@@ -57,6 +59,8 @@ class LiveRuntimeService:
         self._command_service = command_service
         self._turn_orchestrator = turn_orchestrator
         self._user_id = user_id
+        self._live_gateway = live_gateway
+        self._settings = settings
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
 
     async def serve(
@@ -95,6 +99,11 @@ class LiveRuntimeService:
         ]
         for event in events:
             await websocket.send_json(event)
+
+        if self._settings and getattr(self._settings, "live_transport", None) == "gemini_live":
+            await self._serve_real_live(websocket, session_id)
+            return
+
         try:
             while True:
                 message = await websocket.receive()
@@ -405,6 +414,313 @@ class LiveRuntimeService:
             "correlation_id": correlation_id,
             "payload": payload,
         }
+
+    async def _serve_real_live(self, websocket: WebSocket, session_id: UUID) -> None:
+        import asyncio
+        from app.adapters.provider_schemas import LiveSessionContext
+        from starlette.websockets import WebSocketDisconnect
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        system_instruction = (
+            "You are Kith&Kin's real-time voice bridge. "
+            "You are listening to the pharmacist speaking English. "
+            "You must NEVER reply, respond, or generate audio on your own to the pharmacist's voice. "
+            "Only listen and transcribe. "
+            "You will receive English text messages from Kith&Kin to voice to the pharmacist. "
+            "When you receive a text message, read it out loud in English exactly."
+        )
+
+        context = LiveSessionContext(
+            session_id=session_id,
+            user_id=self._user_id or UUID("00000000-0000-4000-8000-000000000001"),
+            system_instruction=system_instruction,
+        )
+
+        buffer = self._buffers.setdefault(session_id, self._initial_events(session_id))
+
+        if not self._live_gateway:
+            fallback = self._append_event(
+                session_id,
+                "fallback.show",
+                {
+                    "code": "LIVE_UNAVAILABLE",
+                    "message_zh": LIVE_UNAVAILABLE_ZH,
+                    "message_en": "Live speech is temporarily unavailable.",
+                    "retryable": True,
+                    "recovery_action": "reconnect",
+                    "related_event_id": None,
+                },
+            )
+            await websocket.send_json(fallback)
+            return
+
+        try:
+            port = await self._live_gateway.open_session(context)
+        except Exception as e:
+            logger.exception("Failed to open Gemini Live session")
+            fallback = self._append_event(
+                session_id,
+                "fallback.show",
+                {
+                    "code": "LIVE_UNAVAILABLE",
+                    "message_zh": LIVE_UNAVAILABLE_ZH,
+                    "message_en": "Live speech is temporarily unavailable.",
+                    "retryable": True,
+                    "recovery_action": "reconnect",
+                    "related_event_id": None,
+                },
+            )
+            await websocket.send_json(fallback)
+            return
+
+        try:
+            await asyncio.gather(
+                self._read_client_loop(websocket, session_id, port),
+                self._read_provider_loop(websocket, session_id, port),
+            )
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            logger.warning(f"Live transport error in serving loops: {e}")
+            fallback = self._append_event(
+                session_id,
+                "fallback.show",
+                {
+                    "code": "COMPANION_UNAVAILABLE",
+                    "message_zh": "实时连接遇到问题，已自动降级。",
+                    "message_en": "Real-time connection encountered an issue.",
+                    "retryable": True,
+                    "recovery_action": "reconnect",
+                    "related_event_id": None,
+                },
+            )
+            try:
+                await websocket.send_json(fallback)
+            except Exception:
+                pass
+        finally:
+            await port.close()
+
+    async def _read_client_loop(self, websocket: WebSocket, session_id: UUID, port: Any) -> None:
+        from starlette.websockets import WebSocketDisconnect
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                frame = message.get("bytes")
+                if isinstance(frame, bytes):
+                    await port.send_audio(frame)
+                    continue
+                text = message.get("text")
+                if isinstance(text, str):
+                    await self._handle_live_command(websocket, session_id, text, port)
+        except WebSocketDisconnect:
+            pass
+
+    async def _read_provider_loop(self, websocket: WebSocket, session_id: UUID, port: Any) -> None:
+        from app.adapters.provider_schemas import (
+            ProviderAudioEvent,
+            ProviderTranscriptEvent,
+            ProviderErrorEvent,
+            ProviderLiveEventType,
+        )
+        model_speaking = False
+        async for event in port.events():
+            if isinstance(event, ProviderAudioEvent):
+                if not model_speaking:
+                    model_speaking = True
+                    muted_evt = self._append_event(
+                        session_id,
+                        "audio.muted",
+                        {"muted": True, "reason": "tts_playback"}
+                    )
+                    await websocket.send_json(muted_evt)
+                    
+                    speaking_evt = self._append_event(
+                        session_id,
+                        "audio.speaking",
+                        {"phase": "started"}
+                    )
+                    await websocket.send_json(speaking_evt)
+                await websocket.send_bytes(event.audio)
+            elif isinstance(event, ProviderTranscriptEvent):
+                if event.language == "zh":
+                    is_final = event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+                    if is_final:
+                        trans_final_evt = self._append_event(
+                            session_id,
+                            "translation.final",
+                            {
+                                "source_transcript_event_id": f"evt_{uuid4()}",
+                                "segment_id": event.utterance_id,
+                                "source_language": "en",
+                                "target_language": "zh_cn",
+                                "translated_text": event.text,
+                                "mode": "faithful",
+                                "append_only": True,
+                                "latency_ms": 100,
+                            }
+                        )
+                        await websocket.send_json(trans_final_evt)
+                elif event.utterance_id == "turn_complete":
+                    if model_speaking:
+                        model_speaking = False
+                        speaking_evt = self._append_event(
+                            session_id,
+                            "audio.speaking",
+                            {"phase": "completed"}
+                        )
+                        await websocket.send_json(speaking_evt)
+                        
+                        muted_evt = self._append_event(
+                            session_id,
+                            "audio.muted",
+                            {"muted": False, "reason": "tts_playback"}
+                        )
+                        await websocket.send_json(muted_evt)
+                        
+                        listening_evt = self._append_event(
+                            session_id,
+                            "audio.listening",
+                            {"active": True}
+                        )
+                        await websocket.send_json(listening_evt)
+                else:
+                    outcomes = await self.handle_provider_event(session_id, event)
+                    for out in outcomes:
+                        await websocket.send_json(out)
+                    is_final = event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+                    if is_final and model_speaking:
+                        model_speaking = False
+                        speaking_evt = self._append_event(
+                            session_id,
+                            "audio.speaking",
+                            {"phase": "completed"}
+                        )
+                        await websocket.send_json(speaking_evt)
+                        
+                        muted_evt = self._append_event(
+                            session_id,
+                            "audio.muted",
+                            {"muted": False, "reason": "tts_playback"}
+                        )
+                        await websocket.send_json(muted_evt)
+                        
+                        listening_evt = self._append_event(
+                            session_id,
+                            "audio.listening",
+                            {"active": True}
+                        )
+                        await websocket.send_json(listening_evt)
+            elif isinstance(event, ProviderErrorEvent):
+                outcomes = await self.handle_provider_event(session_id, event)
+                for out in outcomes:
+                    await websocket.send_json(out)
+
+    async def _handle_live_command(
+        self, websocket: WebSocket, session_id: UUID, text: str, port: Any
+    ) -> None:
+        import json
+        from app.schemas.runtime_events import parse_runtime_event, CardConfirmEvent, TranscriptFinalEvent
+        try:
+            event = parse_runtime_event(json.loads(text))
+        except (ValueError, json.JSONDecodeError):
+            return
+
+        if isinstance(event, TranscriptFinalEvent):
+            from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
+            provider_event = ProviderTranscriptEvent(
+                event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+                provider_event_id=event.event_id,
+                utterance_id=event.payload.utterance_id,
+                speaker=event.payload.speaker,
+                language=event.payload.language,
+                text=event.payload.text,
+                revision=event.payload.revision,
+            )
+            provider_outcomes = await self._handle_transcript_provider_event(
+                session_id, provider_event
+            )
+            for provider_outcome in provider_outcomes:
+                await websocket.send_json(provider_outcome)
+            return
+
+        if self._command_service is not None and not isinstance(event, CardConfirmEvent):
+            outcomes = await self._command_service.handle(event, session_id=session_id)
+            for outcome in outcomes:
+                emitted = self._append_event(
+                    session_id,
+                    outcome.event_type,
+                    outcome.payload,
+                    correlation_id=outcome.correlation_id,
+                )
+                await websocket.send_json(emitted)
+            return
+
+        if isinstance(event, CardConfirmEvent):
+            if self._user_id is None:
+                raise RuntimeError("Missing user ID")
+            context = TrustedRequestContext(
+                session_id=session_id,
+                user_id=self._user_id,
+                origin="runtime",
+            )
+            
+            # Security Gate: Fetch card & verify Guardian ALLOW state
+            card = self._cards.get_card_by_confirmation(event.payload.confirmation_id)
+            if card is None:
+                logger.warning("Card confirmation rejected: card not found")
+                return
+
+            try:
+                outcome = await self._cards.confirm_selected(event.payload.confirmation_id, context)
+            except Exception as e:
+                logger.warning(f"Card confirmation failed: {e}")
+                from app.core.constants import CardActionType
+                err_event = self._append_event(
+                    session_id,
+                    "card.action.status",
+                    {
+                        "confirmation_id": event.payload.confirmation_id,
+                        "action_type": CardActionType.NO_ACTION.value,
+                        "phase": "blocked",
+                        "code": "ACTION_BLOCKED",
+                    },
+                    correlation_id=event.event_id,
+                )
+                await websocket.send_json(err_event)
+                return
+
+            confirmed = self._append_event(
+                session_id,
+                "card.confirmed",
+                {
+                    "confirmation_id": outcome.confirmation_id,
+                    "action_type": outcome.action_type.value,
+                    "replayed": outcome.replayed,
+                },
+                correlation_id=event.event_id,
+            )
+            await websocket.send_json(confirmed)
+
+            if outcome.phase == "succeeded" or outcome.action_type.value in ("speak", "notify_family", "save_memory"):
+                muted_evt = self._append_event(
+                    session_id,
+                    "audio.muted",
+                    {"muted": True, "reason": "tts_playback"}
+                )
+                await websocket.send_json(muted_evt)
+                
+                speaking_evt = self._append_event(
+                    session_id,
+                    "audio.speaking",
+                    {"phase": "started", "card_id": card.card_id}
+                )
+                await websocket.send_json(speaking_evt)
+                await port.send_text(card.en_text)
 
 
 def _string_field(event: dict[str, Any], field: str) -> str:
