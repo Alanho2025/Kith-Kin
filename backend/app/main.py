@@ -150,7 +150,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        if resolved_settings.environment == "test":
+        if resolved_settings.environment in ("test", "development"):
             await initialize_database(db_engine)
         await user_repository.ensure_demo_user(user_id)
         try:
