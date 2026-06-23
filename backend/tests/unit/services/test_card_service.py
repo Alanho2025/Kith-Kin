@@ -16,9 +16,14 @@ from tests.fixtures.clock import MutableClock
 
 
 class SlowConfirmedActionExecutor(ConfirmedActionExecutor):
-    async def execute(self, confirmation_id: str, card: ResponseCard) -> ConfirmationOutcome:
+    async def execute(
+        self,
+        confirmation_id: str,
+        card: ResponseCard,
+        context: TrustedRequestContext | None = None,
+    ) -> ConfirmationOutcome:
         await asyncio.sleep(0.01)
-        return await super().execute(confirmation_id, card)
+        return await super().execute(confirmation_id, card, context)
 
 
 def context() -> TrustedRequestContext:

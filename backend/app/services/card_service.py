@@ -34,7 +34,7 @@ class CardService:
         self._repository = repository or InMemoryConfirmationRepository()
         self._card_sets: dict[tuple[str, str], CardSet] = {}
         self._card_contexts: dict[str, TrustedRequestContext] = {}
-        self._lock = Lock()
+        self._lock = asyncio.Lock()
         self._confirm_lock = asyncio.Lock()
 
     def register_card_set(self, card_set: CardSet, context: TrustedRequestContext) -> None:
@@ -108,7 +108,7 @@ class CardService:
             card = _find_card(card_set, record.card_id)
             if _action_hash(card) != record.action_hash:
                 raise CardConfirmationError("ACTION_INTEGRITY_FAILED")
-            outcome = await self._executor.execute(confirmation_id, card)
+            outcome = await self._executor.execute(confirmation_id, card, context)
             self._repository.update(replace(record, state="confirmed", terminal_outcome=outcome))
             return outcome
 
@@ -129,6 +129,7 @@ class CardService:
         for record in pending:
             if record.user_id == context.user_id:
                 self._repository.update(replace(record, state="cancelled"))
+
 
 def _find_card(card_set: CardSet, card_id: str) -> ResponseCard:
     for card in card_set.cards:
