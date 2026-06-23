@@ -161,6 +161,74 @@ async def test_output_transcript_keeps_input_utterance_id_until_output_finishes(
 
 
 @pytest.mark.anyio
+async def test_incremental_input_transcript_is_accumulated_into_full_sentence() -> None:
+    session = AsyncMock()
+    session.receive = MagicMock()
+    session.receive.return_value = _never_receive()
+    port = GeminiLiveSessionPort(AsyncMock(), session)
+
+    for text, finished in (
+        ("Do you have any ", False),
+        ("allergies?", True),
+    ):
+        await port._process_message(
+            types.LiveServerMessage(
+                server_content=types.LiveServerContent(
+                    input_transcription=types.Transcription(
+                        text=text,
+                        finished=finished,
+                        language_code="en",
+                    )
+                )
+            )
+        )
+
+    partial = await anext(port.events())
+    final = await anext(port.events())
+
+    assert isinstance(partial, ProviderTranscriptEvent)
+    assert partial.text == "Do you have any "
+    assert isinstance(final, ProviderTranscriptEvent)
+    assert final.text == "Do you have any allergies?"
+
+    await port.close()
+
+
+@pytest.mark.anyio
+async def test_incremental_output_translation_is_accumulated_into_full_sentence() -> None:
+    session = AsyncMock()
+    session.receive = MagicMock()
+    session.receive.return_value = _never_receive()
+    port = GeminiLiveSessionPort(AsyncMock(), session)
+
+    for text, finished in (
+        ("你有任何", False),
+        ("过敏吗？", True),
+    ):
+        await port._process_message(
+            types.LiveServerMessage(
+                server_content=types.LiveServerContent(
+                    output_transcription=types.Transcription(
+                        text=text,
+                        finished=finished,
+                        language_code="zh-Hans",
+                    )
+                )
+            )
+        )
+
+    partial = await anext(port.events())
+    final = await anext(port.events())
+
+    assert isinstance(partial, ProviderTranscriptEvent)
+    assert partial.text == "你有任何"
+    assert isinstance(final, ProviderTranscriptEvent)
+    assert final.text == "你有任何过敏吗？"
+
+    await port.close()
+
+
+@pytest.mark.anyio
 async def test_turn_complete_emits_a_completion_event() -> None:
     session = AsyncMock()
     session.receive = MagicMock()

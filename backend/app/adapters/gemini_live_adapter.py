@@ -35,6 +35,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
         self._current_utterance_id = f"utt_{uuid4()}"
         self._input_revision = 1
         self._output_revision = 1
+        self._input_transcript = ""
+        self._output_transcript = ""
         self._read_task = asyncio.create_task(self._read_loop())
 
     async def send_audio(self, frame: bytes) -> None:
@@ -118,7 +120,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
             
             # English input transcript (pharmacist speaking)
             if content.input_transcription:
-                text = content.input_transcription.text or ""
+                self._input_transcript += content.input_transcription.text or ""
+                text = self._input_transcript
                 finished = bool(content.input_transcription.finished)
                 flat_msg = {
                     "type": "input_transcription",
@@ -135,12 +138,14 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 
                 if finished:
                     self._input_revision = 1
+                    self._input_transcript = ""
                 else:
                     self._input_revision += 1
 
             # Chinese translated output transcript (translated subtitles)
             if content.output_transcription:
-                text = content.output_transcription.text or ""
+                self._output_transcript += content.output_transcription.text or ""
+                text = self._output_transcript
                 finished = bool(content.output_transcription.finished)
                 flat_msg = {
                     "type": "input_transcription",
@@ -156,6 +161,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 await self._queue.put(event)
                 if finished:
                     self._output_revision = 1
+                    self._output_transcript = ""
                 else:
                     self._output_revision += 1
 
@@ -190,6 +196,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 self._current_utterance_id = f"utt_{uuid4()}"
                 self._input_revision = 1
                 self._output_revision = 1
+                self._input_transcript = ""
+                self._output_transcript = ""
 
 
 class GeminiLiveAdapter(GeminiLiveGateway):
