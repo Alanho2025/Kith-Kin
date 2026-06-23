@@ -18,12 +18,12 @@ USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 class BarrierRouter:
     def __init__(self) -> None:
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
+        self._started = asyncio.Event()
+        self._release = asyncio.Event()
 
     async def route(self, event):
-        self.started.set()
-        await self.release.wait()
+        self._started.set()
+        await self._release.wait()
         return RouteDecision(
             route_type=RouteType.PASSIVE_TRANSLATION,
             confidence=0.9,
@@ -32,14 +32,14 @@ class BarrierRouter:
 
 
 class BarrierGuardian(GuardianAgent):
-    def __init__(self) -> None:
-        super().__init__()
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._started = asyncio.Event()
+        self._release = asyncio.Event()
 
     async def review_turn(self, event):
-        self.started.set()
-        await self.release.wait()
+        self._started.set()
+        await self._release.wait()
         return await super().review_turn(event)
 
 
@@ -89,11 +89,11 @@ async def test_router_and_guardian_start_for_same_final() -> None:
 
     task = asyncio.create_task(orchestrator.process_final_turn(final_event(), context()))
     await asyncio.wait_for(
-        asyncio.gather(router.started.wait(), guardian.started.wait()),
+        asyncio.gather(router._started.wait(), guardian._started.wait()),
         timeout=0.5,
     )
-    router.release.set()
-    guardian.release.set()
+    router._release.set()
+    guardian._release.set()
     outcome = await task
 
     assert outcome.guardian.decision is GuardianDecisionType.REQUIRE_PARENT_CONFIRMATION
