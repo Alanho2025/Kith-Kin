@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -518,7 +519,29 @@ class LiveRuntimeService:
                     continue
                 text = message.get("text")
                 if isinstance(text, str):
-                    await self._handle_live_command(websocket, session_id, text, port)
+                    try:
+                        await self._handle_live_command(websocket, session_id, text, port)
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning(
+                            "Live command processing failed without closing audio transport: %s",
+                            exc,
+                        )
+                        fallback = self._append_event(
+                            session_id,
+                            "fallback.show",
+                            {
+                                "code": "COMPANION_UNAVAILABLE",
+                                "message_zh": "KK 暂时无法生成回应，实时聆听仍在继续。",
+                                "message_en": (
+                                    "KK cannot generate a response right now; "
+                                    "live listening is still active."
+                                ),
+                                "retryable": True,
+                                "recovery_action": "retry",
+                                "related_event_id": None,
+                            },
+                        )
+                        await websocket.send_json(fallback)
         except WebSocketDisconnect:
             pass
 
