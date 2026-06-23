@@ -104,4 +104,14 @@ export type RuntimeCommandView =
   | {
       eventType: "session.end";
       payload: { reason: "user_completed" | "user_cancelled" };
+    }
+  | {
+      eventType: "transcript.final";
+      payload: {
+        utteranceId: string;
+        speaker: "parent" | "pharmacist" | "unknown";
+        language: "en" | "zh" | "unknown";
+        text: string;
+        revision: number;
+      };
     };

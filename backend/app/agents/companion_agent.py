@@ -288,7 +288,6 @@ class CompanionAgent(Agent):
         else:
             # Generate mock card proposal deterministically based on text
             from app.core.constants import CardActionType, CardRiskLevel
-            from app.schemas.agent_outputs import CardSetProposal
             from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
             
             text_lower = event.payload.text.lower()
