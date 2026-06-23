@@ -81,7 +81,7 @@ def create_app(
         translation_gateway,
         timeout_ms=resolved_settings.rag_timeout_ms,
     )
-    session_service = SessionService(session_store, clock)
+    session_service = SessionService(session_store, clock, visit_repository)
     issuer = AppWebSocketTicketIssuer(resolved_settings, clock)
     verifier = AppWebSocketTicketVerifier(
         resolved_settings,
@@ -89,10 +89,38 @@ def create_app(
         session_store,
         ticket_use_store,
     )
-    card_service = CardService(clock)
+    from typing import Any
+
+    from app.repositories.confirmation_repository import InMemoryConfirmationRepository
+    from app.services.visit_completion_service import (
+        VisitCompletionExecutor,
+        VisitCompletionService,
+    )
+
+    confirmation_repository = InMemoryConfirmationRepository()
+    
+    live_runtime_service: LiveRuntimeService | None = None
+
+    def get_session_events(sid: UUID) -> list[dict[str, Any]]:
+        if live_runtime_service is None:
+            return []
+        return live_runtime_service._buffers.get(sid, [])
+
+    completion_service = VisitCompletionService(
+        memory_repository=memory_repository,
+        notification_repository=notification_repository,
+        get_session_events=get_session_events,
+    )
+    completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
+
+    card_service = CardService(
+        clock=clock,
+        executor=completion_executor,
+        repository=confirmation_repository,
+    )
     router_agent = RouterAgent()
     guardian_agent = GuardianAgent()
-    companion_agent = CompanionAgent(clock)
+    companion_agent = CompanionAgent(clock, session_service)
     turn_orchestrator = TurnOrchestrator(
         router_agent,
         guardian_agent,
@@ -133,7 +161,7 @@ def create_app(
     app.state.ticket_service = TicketService(resolved_settings, session_service, issuer)
     app.state.ticket_verifier = verifier
     app.state.card_service = card_service
-    app.state.live_runtime_service = LiveRuntimeService(
+    live_runtime_service = LiveRuntimeService(
         card_service,
         FakeLiveAdapter(),
         clock,
@@ -142,6 +170,8 @@ def create_app(
         turn_orchestrator,
         user_id,
     )
+    app.state.live_runtime_service = live_runtime_service
+    app.state.visit_completion_service = completion_service
 
     install_error_handlers(app)
     app.include_router(health.router)

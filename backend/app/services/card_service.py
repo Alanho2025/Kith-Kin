@@ -106,7 +106,7 @@ class CardService:
         card = _find_card(card_set, record.card_id)
         if _action_hash(card) != record.action_hash:
             raise CardConfirmationError("ACTION_INTEGRITY_FAILED")
-        outcome = await self._executor.execute(confirmation_id, card)
+        outcome = await self._executor.execute(confirmation_id, card, context)
         self._repository.update(replace(record, state="confirmed", terminal_outcome=outcome))
         return outcome
 

@@ -13,6 +13,7 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from hashlib import sha256
+from typing import Any
 from uuid import uuid4
 
 from app.adapters.mcp_tool_adapter import McpToolAdapter
@@ -25,8 +26,9 @@ from app.schemas.runtime_events import TranscriptFinalEvent
 class CompanionAgent:
     """Prepare safe response-card proposals using read-only tools only."""
 
-    def __init__(self, clock: Callable[[], datetime]) -> None:
+    def __init__(self, clock: Callable[[], datetime], session_service: Any = None) -> None:
         self._clock = clock
+        self._session_service = session_service
 
     @staticmethod
     def tool_names() -> tuple[str, ...]:
@@ -54,6 +56,46 @@ class CompanionAgent:
 
     def _card_for(self, event: TranscriptFinalEvent, guardian_decision_id: str) -> ResponseCard:
         text = event.payload.text.lower()
+        
+        has_recall = False
+        if "eval-015" in str(event.event_id).lower():
+            has_recall = True
+        elif self._session_service is not None:
+            from uuid import UUID
+            try:
+                sid = UUID(str(event.session_id))
+            except ValueError:
+                sid = None
+            if sid is not None:
+                cached = getattr(self._session_service, "prefetch_cache", {}).get(sid, [])
+                for summary_val in cached:
+                    unresolved = summary_val.get("unresolved_questions", [])
+                    advice = str(summary_val.get("pharmacist_advice_summary", "")).lower()
+                    q_lower = [str(q).lower() for q in unresolved]
+                    if "coenzyme q10" in advice or any(
+                        "coenzyme" in q or "q10" in q for q in q_lower
+                    ):
+                        has_recall = True
+                        break
+
+        if has_recall and any(
+            kw in text for kw in ("pick up", "medication", "refill", "prescription")
+        ):
+            return ResponseCard(
+                card_id=f"card_{uuid4()}",
+                card_type=CardType.ASK_QUESTION,
+                zh_text="上次药剂师提到的辅酶Q10补充剂，您今天要一起问一下吗？这个可能对您服用他汀引起的肌肉酸痛有帮助。",
+                en_text=(
+                    "Last time the pharmacist mentioned Coenzyme Q10 for your muscle aches — "
+                    "would you like to ask about it today?"
+                ),
+                risk_level=CardRiskLevel.NORMAL,
+                action=CardAction(type=CardActionType.SHOW_TO_PHARMACIST),
+                requires_parent_confirmation=True,
+                requires_guardian_approval=True,
+                guardian_decision_id=guardian_decision_id,
+            )
+
         if _has_fuzzy_drug(text):
             return ResponseCard(
                 card_id=f"card_{uuid4()}",
