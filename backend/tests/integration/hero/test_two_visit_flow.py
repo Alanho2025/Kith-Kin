@@ -155,15 +155,16 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     )
     
     from unittest.mock import patch
+
     from google.adk.events import Event
-    from google.adk.sessions.in_memory_session_service import InMemorySessionService
     
     async def mock_run_async(self_runner, user_id, session_id, new_message=None, **kwargs):
-        from app.schemas.agent_outputs import CardSetProposal
-        from app.schemas.cards import CardSet, ResponseCard, CardType, CardAction
-        from app.core.constants import CardRiskLevel, CardActionType
-        from uuid import uuid4
         from datetime import timedelta
+        from uuid import uuid4
+
+        from app.core.constants import CardActionType, CardRiskLevel
+        from app.schemas.agent_outputs import CardSetProposal
+        from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
         
         session = await self_runner.session_service.get_session(
             app_name=self_runner.app_name, user_id=user_id, session_id=session_id
@@ -194,12 +195,16 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             ),
             proposal_hash="dummy_hash",
         )
-        real_session = self_runner.session_service.sessions[self_runner.app_name][user_id][session_id]
+        real_session = self_runner.session_service.sessions[
+            self_runner.app_name
+        ][user_id][session_id]
         real_session.state["companion_proposal"] = proposal.model_dump()
         yield Event(author="Companion", message="Mock proposal cards")
 
     with patch("google.adk.runners.Runner.run_async", mock_run_async):
-        proposal = await companion_agent.propose_cards(event_2, route_decision, f"guardian_{uuid4()}")
+        proposal = await companion_agent.propose_cards(
+            event_2, route_decision, f"guardian_{uuid4()}"
+        )
         
     assert len(proposal.card_set.cards) == 1
     card = proposal.card_set.cards[0]

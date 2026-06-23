@@ -1,24 +1,25 @@
 import os
-import pytest
+from datetime import UTC, datetime
 from uuid import uuid4
-from datetime import datetime, UTC
 
+import pytest
+
+from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.agents.companion_agent import CompanionAgent
+from app.agents.guardian_agent import GuardianAgent
+from app.agents.router_agent import RouterAgent
 from app.core.config import Settings
 from app.domain.credentials import TrustedRequestContext
-from app.schemas.runtime_events import TranscriptFinalEvent, TranscriptPayload
-from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
-from app.services.turn_orchestrator import TurnOrchestrator
-from app.agents.router_agent import RouterAgent
-from app.agents.guardian_agent import GuardianAgent
-from app.agents.companion_agent import CompanionAgent
+from app.repositories.confirmation_repository import InMemoryConfirmationRepository
+from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
-from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
-from app.services.rag_service import RagService
-from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.schemas.agent_outputs import RouteType
+from app.schemas.runtime_events import TranscriptFinalEvent, TranscriptPayload
 from app.services.card_service import CardService
+from app.services.rag_service import RagService
+from app.services.turn_orchestrator import TurnOrchestrator
 from app.services.visit_completion_service import VisitCompletionExecutor, VisitCompletionService
-from app.repositories.confirmation_repository import InMemoryConfirmationRepository
 
 TEST_USER_ID = os.getenv("TEST_USER_ID", "00000000-0000-4000-8000-000000000001")
 
@@ -32,9 +33,13 @@ async def test_adk_live_flow(db_sessions) -> None:
     # Set up settings with the API key from environment
     settings = Settings(google_api_key=os.environ.get("GOOGLE_API_KEY"))
 
-    clock_now = lambda: datetime.now(UTC)
+    def clock_now():
+        return datetime.now(UTC)
+
     session_id = uuid4()
-    context = TrustedRequestContext(session_id=session_id, user_id=TEST_USER_ID, origin="test")
+    context = TrustedRequestContext(
+        session_id=session_id, user_id=TEST_USER_ID, origin="test"
+    )
 
     # Repos and Services
     memory_repo = MemoryRepository(db_sessions, clock_now)

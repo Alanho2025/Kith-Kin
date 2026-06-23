@@ -1,6 +1,7 @@
 """Deterministic Router agent inheriting from ADK BaseAgent."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event
