@@ -206,12 +206,11 @@ class GeminiLiveAdapter(GeminiLiveGateway):
 
             client = genai.Client(api_key=key_val)
             
-            # Configure LiveConnectConfig to receive audio and set system instruction
+            # Configure LiveConnectConfig
             config = types.LiveConnectConfig(
                 response_modalities=["AUDIO"],
-                system_instruction=types.Content(
-                    parts=[types.Part(text=context.system_instruction)]
-                ),
+                input_audio_transcription=types.AudioTranscriptionConfig(),
+                output_audio_transcription=types.AudioTranscriptionConfig(),
             )
             
             # Connect using gemini-3.5-live-translate-preview
