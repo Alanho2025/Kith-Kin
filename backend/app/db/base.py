@@ -12,6 +12,8 @@ def import_models() -> None:
     from app.db.models import (  # noqa: F401
         allergy,
         confirmation,
+        drug_interaction_rule,
+        drug_knowledge_entity,
         medication,
         notification,
         session,
