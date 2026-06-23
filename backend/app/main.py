@@ -13,6 +13,7 @@ from app.adapters.fake_live_adapter import FakeLiveAdapter
 from app.adapters.gemini_live_adapter import GeminiLiveAdapter
 from app.adapters.gemini_live_translate_adapter import GeminiLiveTranslateAdapter
 from app.adapters.gemini_text_adapter import GeminiTextAdapter
+from app.adapters.mcp_tool_adapter import McpToolAdapter
 from app.agents.companion_agent import CompanionAgent
 from app.agents.guardian_agent import GuardianAgent
 from app.agents.router_agent import RouterAgent
@@ -20,6 +21,7 @@ from app.api.error_handlers import install_error_handlers
 from app.api.routes import cards, health, live, sessions
 from app.core.config import Settings
 from app.db.session import create_engine, create_session_factory, initialize_database
+from app.domain.credentials import TrustedRequestContext
 from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
@@ -36,8 +38,6 @@ from app.services.session_service import SessionService
 from app.services.ticket_service import TicketService
 from app.services.translation_service import TranslationService
 from app.services.turn_orchestrator import TurnOrchestrator
-from app.adapters.mcp_tool_adapter import McpToolAdapter
-from app.domain.credentials import TrustedRequestContext
 
 DEFAULT_DEVELOPMENT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
