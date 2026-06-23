@@ -1,6 +1,6 @@
 # Phase 03: Elderly UI on Mock Runtime Implementation Plan
 
-Status: implemented; automated checkpoint green, final responsive browser sign-off pending
+Status: implemented and accepted
 
 > Execute with strict TDD, frontend-app-builder design approval, and browser snapshot verification.
 
@@ -174,4 +174,4 @@ Run `npm --prefix frontend run lint`, `typecheck`, `test`, and `build`, then bro
 - Frontend tests, lint, typecheck, and build are green.
 - Playwright verified one-tap start, event-driven desktop conversation, named controls, card selection, and confirmation-sheet rendering without typed input.
 - Browser testing found synchronous mock acknowledgement and confirmation-cancel defects; both received regression tests and fixes.
-- Final post-fix 360px/1280px screenshots remain blocked by the browser tool usage limit. See `docs/PHASE_03_BROWSER_QA.md`; this plan is not marked fully accepted.
+- The post-fix cancel workflow and final 360px/1280px screenshots passed in the in-app Browser. See `docs/PHASE_03_BROWSER_QA.md`.

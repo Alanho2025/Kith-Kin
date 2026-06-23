@@ -82,7 +82,17 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.PAYMENT_REQUEST,
         )
-    if any(marker in lowered for marker in ("passport", "medicare", "driver licence")):
+    if any(marker in lowered for marker in (
+        "passport",
+        "medicare",
+        "driver licence",
+        "driver's licence",
+        "drivers licence",
+        "driver license",
+        "driver's license",
+        "drivers license",
+        "driving licence",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
@@ -94,7 +104,23 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.ADDRESS_REQUEST,
         )
-    if any(marker in lowered for marker in ("stop taking", "change your dose", "take double")):
+    medical_confirmation_markers = (
+        "stop taking",
+        "change your dose",
+        "take double",
+        "ibuprofen",
+        "lisinopril",
+        "medicine",
+        "medication",
+        "drug",
+        "allergy",
+        "allergies",
+        "antibiotic",
+        "dose",
+        "prescription",
+        "refill",
+    )
+    if any(marker in lowered for marker in medical_confirmation_markers):
         return (
             SafetyBackstopResult.REQUIRE_CONFIRMATION,
             BackstopRisk.MEDICAL,

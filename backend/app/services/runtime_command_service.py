@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.core.constants import CardActionType
-from app.domain.confirmation import CardConfirmationError, CardSelectCommand
+from app.domain.confirmation import CardSelectCommand
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import (
     CardCancelEvent,
@@ -95,6 +95,7 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, SelfSpeakEvent):
+            await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
                     "audio.listening",
