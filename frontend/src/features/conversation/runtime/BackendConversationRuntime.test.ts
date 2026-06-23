@@ -36,6 +36,31 @@ class FakeSocket implements RuntimeSocket {
 
 
 describe("BackendConversationRuntime", () => {
+  it("does not open a stale socket after disconnecting during ticket issuance", async () => {
+    let resolveTicket!: (response: Response) => void;
+    const fetchFn: typeof fetch = () =>
+      new Promise<Response>((resolve) => {
+        resolveTicket = resolve;
+      });
+    const sockets: FakeSocket[] = [];
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connecting = runtime.connect("ses-1");
+    await runtime.disconnect();
+    resolveTicket(new Response(null, { status: 201 }));
+    await connecting;
+
+    expect(sockets).toHaveLength(0);
+  });
+
   it("requests an app ticket and maps the backend websocket contract", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetchFn: typeof fetch = (input, init) => {

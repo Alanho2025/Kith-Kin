@@ -72,6 +72,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private sequence = 1;
   private audioRecorder: AudioRecorder | null = null;
   private audioPlayer: AudioPlayer | null = null;
+  private connectionGeneration = 0;
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
     this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
@@ -80,12 +81,14 @@ export class BackendConversationRuntime implements ConversationRuntime {
   }
 
   async connect(sessionId: string): Promise<void> {
+    const generation = ++this.connectionGeneration;
     this.sessionId = sessionId;
     const response = await this.fetchFn(
       `${this.baseUrl}/api/sessions/${sessionId}/ticket`,
       { method: "POST", credentials: "include" },
     );
     if (!response.ok) throw new Error("RUNTIME_TICKET_REQUEST_FAILED");
+    if (generation !== this.connectionGeneration) return;
     const websocketBase = this.baseUrl.replace(/^http/, "ws");
     const socket = this.socketFactory(`${websocketBase}/api/sessions/${sessionId}/live`);
     socket.binaryType = "arraybuffer";
@@ -102,12 +105,17 @@ export class BackendConversationRuntime implements ConversationRuntime {
       socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
     });
 
+    if (generation !== this.connectionGeneration) {
+      socket.close();
+      return;
+    }
     await this.audioRecorder.start((pcm) => {
       this.socket?.send(pcm);
     });
   }
 
   disconnect(): Promise<void> {
+    this.connectionGeneration += 1;
     this.socket?.close();
     this.socket = null;
     this.audioRecorder?.stop();
