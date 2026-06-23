@@ -36,6 +36,8 @@ from app.services.session_service import SessionService
 from app.services.ticket_service import TicketService
 from app.services.translation_service import TranslationService
 from app.services.turn_orchestrator import TurnOrchestrator
+from app.adapters.mcp_tool_adapter import McpToolAdapter
+from app.domain.credentials import TrustedRequestContext
 
 DEFAULT_DEVELOPMENT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
@@ -121,11 +123,24 @@ def create_app(
     router_agent = RouterAgent()
     guardian_agent = GuardianAgent()
     companion_agent = CompanionAgent(clock, session_service)
+    def mcp_tool_adapter_factory(context: TrustedRequestContext) -> McpToolAdapter:
+        return McpToolAdapter(
+            settings=resolved_settings,
+            context=context,
+            rag_service=rag_service,
+            memory_repository=memory_repository,
+            notification_repository=notification_repository,
+            drug_knowledge_repository=drug_knowledge_repository,
+        )
+
     turn_orchestrator = TurnOrchestrator(
-        router_agent,
-        guardian_agent,
-        companion_agent,
-        card_service,
+        router=router_agent,
+        guardian=guardian_agent,
+        companion=companion_agent,
+        card_service=card_service,
+        mcp_tool_adapter_factory=mcp_tool_adapter_factory,
+        settings=resolved_settings,
+        clock=clock,
     )
     runtime_command_service = RuntimeCommandService(card_service, user_id)
 
