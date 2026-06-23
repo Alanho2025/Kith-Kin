@@ -71,13 +71,14 @@ class RuntimeCommandService:
                     "action_type": outcome.action_type.value,
                     "replayed": outcome.replayed,
                 }
-            except CardConfirmationError:
-                legacy = self._cards.confirm(event.payload.confirmation_id)
+            except CardConfirmationError as error:
                 payload = {
-                    "confirmation_id": legacy.confirmation_id,
-                    "action_type": CardActionType.SPEAK.value,
-                    "replayed": legacy.replayed,
+                    "confirmation_id": event.payload.confirmation_id,
+                    "action_type": CardActionType.NO_ACTION.value,
+                    "phase": "blocked",
+                    "code": error.code,
                 }
+                return (RuntimeCommandEvent("card.action.status", payload, event.event_id),)
             return (RuntimeCommandEvent("card.confirmed", payload, event.event_id),)
         if isinstance(event, CardCancelEvent):
             await self._cards.cancel(event.payload.confirmation_id, context)

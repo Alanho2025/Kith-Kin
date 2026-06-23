@@ -3,7 +3,9 @@ from fastapi.testclient import TestClient
 from .conftest import ORIGIN, create_session, issue_ticket
 
 
-def test_http_and_ws_share_idempotent_service(app_client: TestClient) -> None:
+def test_runtime_rejects_arbitrary_confirm_but_http_recovery_remains_legacy(
+    app_client: TestClient,
+) -> None:
     session_id = create_session(app_client)
     issue_ticket(app_client, session_id)
     confirmation_id = "confirmation-shared-1"
@@ -26,9 +28,14 @@ def test_http_and_ws_share_idempotent_service(app_client: TestClient) -> None:
                 "payload": {"confirmation_id": confirmation_id},
             }
         )
-        confirmed = socket.receive_json()
-        assert confirmed["event_type"] == "card.confirmed"
-        assert confirmed["payload"]["replayed"] is False
+        blocked = socket.receive_json()
+        assert blocked["event_type"] == "card.action.status"
+        assert blocked["payload"] == {
+            "confirmation_id": confirmation_id,
+            "action_type": "no_action",
+            "phase": "blocked",
+            "code": "CARD_NOT_FOUND",
+        }
 
     recovered = app_client.post(
         "/api/cards/confirm",
@@ -36,6 +43,17 @@ def test_http_and_ws_share_idempotent_service(app_client: TestClient) -> None:
     )
     assert recovered.status_code == 200
     assert recovered.json() == {
+        "confirmation_id": confirmation_id,
+        "status": "confirmed",
+        "replayed": False,
+    }
+
+    replayed = app_client.post(
+        "/api/cards/confirm",
+        json={"confirmation_id": confirmation_id},
+    )
+    assert replayed.status_code == 200
+    assert replayed.json() == {
         "confirmation_id": confirmation_id,
         "status": "confirmed",
         "replayed": True,

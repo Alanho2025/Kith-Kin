@@ -1,11 +1,24 @@
+import asyncio
+
 import pytest
 
-from app.domain.confirmation import CardConfirmationError, CardSelectCommand
+from app.domain.confirmation import (
+    CardConfirmationError,
+    CardSelectCommand,
+    ConfirmationOutcome,
+)
 from app.domain.credentials import TrustedRequestContext
+from app.schemas.cards import ResponseCard
 from app.services.card_service import CardService
 from app.services.confirmed_action_executor import ConfirmedActionExecutor
 from tests.fixtures.cards.approved_card_sets import approved_card_set
 from tests.fixtures.clock import MutableClock
+
+
+class SlowConfirmedActionExecutor(ConfirmedActionExecutor):
+    async def execute(self, confirmation_id: str, card: ResponseCard) -> ConfirmationOutcome:
+        await asyncio.sleep(0.01)
+        return await super().execute(confirmation_id, card)
 
 
 def context() -> TrustedRequestContext:
@@ -50,6 +63,26 @@ async def test_duplicate_confirm_returns_stored_outcome() -> None:
 
     assert first.replayed is False
     assert second.replayed is True
+    assert executor.action_count == 1
+
+
+async def test_parallel_confirms_execute_once_and_replay() -> None:
+    clock = MutableClock()
+    executor = SlowConfirmedActionExecutor()
+    service = CardService(clock.now, executor)
+    card_set = approved_card_set(clock)
+    service.register_card_set(card_set, context())
+    selected = await service.select(
+        CardSelectCommand(card_set.card_set_id, card_set.cards[0].card_id, card_set.revision),
+        context(),
+    )
+
+    first, second = await asyncio.gather(
+        service.confirm_selected(selected.confirmation_id, context()),
+        service.confirm_selected(selected.confirmation_id, context()),
+    )
+
+    assert {first.replayed, second.replayed} == {False, True}
     assert executor.action_count == 1
 
 
