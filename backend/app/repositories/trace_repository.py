@@ -32,9 +32,12 @@ class TraceRepository:
     ) -> None:
         safe_payload = {key: payload[key] for key in sorted(payload) if key in RAG_TRACE_FIELDS}
         async with self._session_factory() as session:
-            next_sequence = (
+            # Use MAX(sequence)+1 within the same write transaction so concurrent
+            # inserts for the same session cannot produce duplicate sequence numbers.
+            # SQLite serialises writes, making this the correct atomic pattern.
+            max_seq = (
                 await session.scalar(
-                    select(func.count()).select_from(TraceEvent).where(
+                    select(func.coalesce(func.max(TraceEvent.sequence), 0)).where(
                         TraceEvent.session_id == context.session_id
                     )
                 )
@@ -43,7 +46,7 @@ class TraceRepository:
                 TraceEvent(
                     session_id=context.session_id,
                     user_id=context.user_id,
-                    sequence=next_sequence + 1,
+                    sequence=max_seq + 1,
                     event_type=event_type,
                     payload=safe_payload,
                     created_at=self._clock(),

@@ -1,6 +1,11 @@
-"""Guardian policy boundary with deterministic fail-closed backstop."""
+"""Guardian safety agent inheriting from ADK BaseAgent."""
 
+from collections.abc import AsyncGenerator
 from uuid import uuid4
+
+from google.adk.agents import BaseAgent
+from google.adk.agents.invocation_context import InvocationContext
+from google.adk.events import Event
 
 from app.core.constants import CardRiskLevel, GuardianDecisionType
 from app.domain.safety_policy import (
@@ -29,11 +34,43 @@ RISK_PRIORITY = {
 }
 
 
-class GuardianAgent:
-    """Inspect every final turn and proposed card set."""
+class GuardianAgent(BaseAgent):
+    """Inspect every final turn and proposed card set for safety policy violations."""
+
+    name: str = "Guardian"
+    description: str = "Fail-closed safety backstop agent."
 
     async def review_turn(self, event: TranscriptFinalEvent) -> GuardianDecision:
-        result, risk, reason = screen_turn_text(event.payload.text)
+        """Inspect a final transcript directly without ADK session.
+
+        Args:
+            event: The transcript final event.
+
+        Returns:
+            The guardian decision.
+        """
+        return self._review_text(event.payload.text)
+
+    async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        """ADK execution entrypoint for sequential/parallel safety flows.
+
+        Args:
+            ctx: The ADK invocation context.
+
+        Yields:
+            ADK Event indicating safety outcomes.
+        """
+        text = ""
+        if ctx.user_content and ctx.user_content.parts:
+            text = "".join(part.text for part in ctx.user_content.parts if part.text)
+
+        decision = self._review_text(text)
+        ctx.session.state["guardian_decision"] = decision.model_dump()
+
+        yield Event(author=self.name, message=f"Guardian decision: {decision.decision}")
+
+    def _review_text(self, text: str) -> GuardianDecision:
+        result, risk, reason = screen_turn_text(text)
         if result is SafetyBackstopResult.BLOCK:
             return GuardianDecision(
                 guardian_decision_id=f"guardian_{uuid4()}",
@@ -56,6 +93,14 @@ class GuardianAgent:
         )
 
     async def review_cards(self, card_set: CardSet) -> GuardianDecision:
+        """Inspect a proposed card set for safety compliance.
+
+        Args:
+            card_set: The proposed response card set.
+
+        Returns:
+            The final review decision.
+        """
         if any(not card.requires_guardian_approval for card in card_set.cards):
             return GuardianDecision(
                 guardian_decision_id=f"guardian_{uuid4()}",

@@ -1,0 +1,1 @@
+"""Hero integration test fixtures."""

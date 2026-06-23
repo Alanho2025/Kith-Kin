@@ -34,4 +34,4 @@ class Confirmation(Base):
     payload: Mapped[dict[str, object]] = mapped_column(JSON)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    terminal_result: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    terminal_outcome: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)

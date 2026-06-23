@@ -27,6 +27,7 @@ SKIPPED_DIRECTORY_NAMES = {
     "__pycache__",
     "node_modules",
 }
+SKIPPED_DIRECTORY_PREFIXES = (".venv",)
 SECRET_PATTERNS = {
     "google_api_key": re.compile(r"AIza[0-9A-Za-z_-]{35}"),
     "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -68,7 +69,11 @@ def _walk_candidate_files() -> set[Path]:
     candidates: set[Path] = set()
     for path in ROOT.rglob("*"):
         relative = path.relative_to(ROOT)
-        if any(part in SKIPPED_DIRECTORY_NAMES for part in relative.parts):
+        if any(
+            part in SKIPPED_DIRECTORY_NAMES
+            or part.startswith(SKIPPED_DIRECTORY_PREFIXES)
+            for part in relative.parts
+        ):
             continue
         if path.is_file():
             candidates.add(path)
@@ -84,10 +89,12 @@ def find_violations() -> list[str]:
     """Return deterministic, value-free descriptions of detected violations."""
     violations: list[str] = []
     for path in sorted(_candidate_files()):
+        relative = path.relative_to(ROOT)
+        if any(part.startswith(SKIPPED_DIRECTORY_PREFIXES) for part in relative.parts):
+            continue
         if not path.is_file() or path.suffix not in TEXT_SUFFIXES:
             continue
         content = path.read_text(encoding="utf-8", errors="ignore")
-        relative = path.relative_to(ROOT)
         for name, pattern in SECRET_PATTERNS.items():
             if pattern.search(content):
                 violations.append(f"{relative}:{name}")

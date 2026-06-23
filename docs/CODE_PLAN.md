@@ -142,8 +142,8 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 - Phase 00: checkpoint executed with credentials; backend Gemini Live connectivity and 10/10 input transcriptions pass, while the real text-translation sidecar remains `fail` on latency.
 - Phase 01: complete; dependency locks, environment examples, ignore policy, secret scanner, SQLite environment config, and quality toolchains are green.
 - Phase 02: complete; typed backend contracts cover every runtime event/command, card/MCP DTOs and state machines are green, and frontend/shared fixture mapping is green.
-- Phase 03: implemented with accessible mock runtime UI, reducer/hooks, confirmation/Guardian/fallback/summary flows, and automated checks green; final 360px/1280px browser screenshot sign-off remains externally blocked and is not claimed.
-- Phase 04: implemented with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter; acceptance remains dependent on the Phase 03 browser gate.
+- Phase 03: implemented and accepted with accessible mock runtime UI, reducer/hooks, confirmation/Guardian/fallback/summary flows, automated checks, post-fix cancel verification, and final 360px/1280px browser captures.
+- Phase 04: implemented and accepted with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter.
 - Phase 05: implemented with SQLite schema/migration, scoped repositories, atomic ticket JTI consumption, bounded RAG, canonical MCP tool manifest/adapter, demo seed/cleanup, and redacted trace primitives.
 - Phase 06: fixture-backed implementation complete with provider-normalised Gemini Live events, faithful final-turn text translation sidecar, append-only translation runtime events, deduplication, timeout fallback, and task cleanup. Credential-backed real smoke is `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied.
 - Phase 07: implemented with concurrent Router/Guardian orchestration for each final turn, deterministic Guardian backstop screening, read-only Companion tooling, structured agent outputs, and Guardian review of proposed cards.
@@ -180,7 +180,7 @@ Recorded 2026-06-22:
 |---|---|
 | Phase 03 focused UI cycles | status, subtitle, selection/confirmation, Guardian, self-speak, fallback, summary, and accessibility covered |
 | Phase 03 automated checkpoint | frontend tests/lint/typecheck/build pass |
-| Phase 03 browser workflow | start, desktop conversation, selection, and confirmation verified; final cancel recheck and 360/1280 screenshots externally blocked |
+| Phase 03 browser workflow | start, conversation, selection, confirmation, cancel dismissal, and 360/1280 screenshots verified |
 | Phase 04 API/WebSocket integration | 17 tests cover cookie, 4401/4403/4409/4410, event ordering, binary audio, bounded replay/fallback, and shared confirmation |
 | Phase 04 frontend backend adapter | ticket request and WebSocket event mapping contract covered |
 | Persistence/migrations | none; Phase 04 stores remain injected in-memory implementations |
@@ -194,7 +194,7 @@ Recorded 2026-06-22:
 | Check | Result |
 |---|---|
 | Phase 05/06 focused backend tests | 17 passed |
-| Full backend pytest | 102 passed |
+| Full backend pytest | 121 passed |
 | Ruff | all checks passed |
 | Mypy | 68 source files, no issues |
 | Migration round trip | upgrade -> downgrade -> upgrade covered by integration test |
@@ -208,12 +208,13 @@ Recorded 2026-06-22:
 
 | Check | Result |
 |---|---|
-| Full backend pytest | 119 passed |
+| Full backend pytest | 121 passed |
 | Ruff | all checks passed |
 | Mypy | 81 source files, no issues |
 | Router/Guardian concurrency | covered by integration test |
 | Guardian block and card review | covered by deterministic unit/integration tests |
 | Card selection and confirmation | select has zero side effects; confirm executes once; duplicate confirm replays stored outcome |
 | Half-duplex audio | mute/speaking/frame/completed/unmute/listening ordering covered; TTS failure restores listening |
+| Deterministic eval runner | six Phase 07 cases pass with sanitised JSON traces |
 
 The Phase 07/08 implementation remains fixture-backed and deterministic. It does not claim real notification, real visit-summary writeback, or any external side effect before Phase 09.

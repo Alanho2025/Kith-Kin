@@ -31,9 +31,11 @@ class RagService:
         started = perf_counter()
         outcome = "success"
         truncated = False
+        record_count = 0
         try:
             async with asyncio.timeout(self._settings.rag_timeout_ms / 1000):
                 records = await self._memory_repository.search(request, context)
+                record_count = len(records)
                 result = limit_retrieval_context(
                     records,
                     max_records=self._settings.rag_max_records,
@@ -50,9 +52,6 @@ class RagService:
             outcome = "unavailable"
             return RetrievalContext(snippets=(), total_chars=0, truncated=False)
         finally:
-            record_count = 0 if outcome in {"timeout", "unavailable"} else len(
-                locals().get("records", ())
-            )
             await self._record_trace(
                 context,
                 query_category=request.category.value,

@@ -41,12 +41,12 @@ def test_stale_sequence_emits_resume_unavailable_then_closes(
                 {
                     "schema_version": "0.1",
                     "event_id": f"cmd-{index}",
-                    "event_type": "card.confirm",
+                    "event_type": "control.self_speak",
                     "session_id": session_id,
                     "sequence": index + 1,
                     "timestamp": "2026-06-22T00:00:00Z",
                     "correlation_id": None,
-                    "payload": {"confirmation_id": f"confirmation-{index}"},
+                    "payload": {},
                 }
             )
             first.receive_json()
