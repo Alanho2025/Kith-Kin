@@ -74,6 +74,53 @@ async def test_live_transport_fails_gracefully_on_open_error(live_app_client: Te
 
 
 @pytest.mark.anyio
+async def test_agent_failure_does_not_close_live_audio_transport(
+    live_app_client: TestClient,
+) -> None:
+    gateway = live_app_client.app.state.mock_live_gateway
+    port = MockSessionPort()
+    gateway.open_session.return_value = port
+    live_app_client.app.state.turn_orchestrator.process_final_turn = AsyncMock(
+        side_effect=ValueError("ROUTER_UNAVAILABLE")
+    )
+
+    session_id = create_session(live_app_client)
+    issue_ticket(live_app_client, session_id)
+
+    with live_app_client.websocket_connect(
+        f"/api/sessions/{session_id}/live",
+        headers={"origin": ORIGIN},
+    ) as socket:
+        socket.receive_json()  # ready
+        socket.receive_json()  # listening
+        socket.send_json({
+            "schema_version": "0.1",
+            "event_id": "evt-client-agent-failure",
+            "event_type": "transcript.final",
+            "session_id": session_id,
+            "sequence": 3,
+            "timestamp": "2026-06-22T13:00:00Z",
+            "correlation_id": None,
+            "payload": {
+                "utterance_id": "utt-agent-failure",
+                "speaker": "pharmacist",
+                "language": "en",
+                "text": "How are you?",
+                "revision": 1,
+            },
+        })
+
+        fallback = socket.receive_json()
+        while fallback["event_type"] != "fallback.show":
+            fallback = socket.receive_json()
+        assert fallback["payload"]["code"] == "COMPANION_UNAVAILABLE"
+
+        socket.send_bytes(b"\x00\x01")
+        await asyncio.sleep(0.05)
+        port.send_audio.assert_awaited_with(b"\x00\x01")
+
+
+@pytest.mark.anyio
 async def test_live_transport_guardian_gates_before_speak(live_app_client: TestClient) -> None:
     gateway = live_app_client.app.state.mock_live_gateway
     port = MockSessionPort()
