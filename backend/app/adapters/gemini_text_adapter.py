@@ -40,9 +40,10 @@ class GeminiTextAdapter(TranslationGateway):
                 client = genai.Client(api_key=key_val)
                 model_name = self._settings.gemini_text_model or "gemini-2.5-flash"
                 prompt = (
-                    "You are a faithful translator. Translate the following English medical/pharmacy transcript "
-                    "into Chinese. Retain the original meaning exactly without adding any medical advice, "
-                    "recommendations, diagnoses, or extra information. Only return the direct translation:\n\n"
+                    "You are a faithful translator. Translate the following English "
+                    "medical/pharmacy transcript into Chinese. Retain the original "
+                    "meaning exactly without adding any medical advice, recommendations, "
+                    "diagnoses, or extra information. Only return the direct translation:\n\n"
                     f"{request.text}"
                 )
                 response = await client.aio.models.generate_content(

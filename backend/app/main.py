@@ -53,7 +53,10 @@ def create_app(
     clock: Callable[[], datetime] = utc_now,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
-    if resolved_settings.google_api_key.get_secret_value():
+    if (
+        resolved_settings.environment != "test"
+        and resolved_settings.google_api_key.get_secret_value()
+    ):
         import os
         os.environ["GOOGLE_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
         os.environ["GEMINI_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
