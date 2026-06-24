@@ -33,6 +33,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
         self._queue: asyncio.Queue[ProviderLiveEvent | None] = asyncio.Queue()
         self._closed = False
         self._current_utterance_id = f"utt_{uuid4()}"
+        self._current_transcript_text = ""
         self._revision = 1
         self._read_task = asyncio.create_task(self._read_loop())
 
@@ -115,13 +116,13 @@ class GeminiLiveSessionPort(LiveSessionPort):
         # 1. Check for tool calls
         if msg.tool_call and msg.tool_call.function_calls:
             for call in msg.tool_call.function_calls:
-                event = ProviderToolCallEvent(
+                tool_event = ProviderToolCallEvent(
                     event_type=ProviderLiveEventType.TOOL_CALL,
                     provider_event_id=call.id,
                     name=call.name,
                     arguments=call.args or {},
                 )
-                await self._queue.put(event)
+                await self._queue.put(tool_event)
             return
 
         # 2. Check for server content (transcriptions and audio)
@@ -132,41 +133,27 @@ class GeminiLiveSessionPort(LiveSessionPort):
             if content.input_transcription:
                 text = content.input_transcription.text or ""
                 finished = bool(content.input_transcription.finished)
+                accumulated_text = _merge_transcript_text(self._current_transcript_text, text)
+                self._current_transcript_text = accumulated_text
                 flat_msg = {
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
                     "utterance_id": self._current_utterance_id,
                     "speaker": "pharmacist",
                     "language": "en",
-                    "text": text,
+                    "text": accumulated_text,
                     "revision": self._revision,
                     "final": finished,
                 }
-                event = GeminiLiveAdapter.map_provider_message(flat_msg)
-                await self._queue.put(event)
+                transcript_event = GeminiLiveAdapter.map_provider_message(flat_msg)
+                await self._queue.put(transcript_event)
                 
                 if finished:
                     self._current_utterance_id = f"utt_{uuid4()}"
+                    self._current_transcript_text = ""
                     self._revision = 1
                 else:
                     self._revision += 1
-
-            # Chinese translated output transcript (translated subtitles)
-            if content.output_transcription:
-                text = content.output_transcription.text or ""
-                finished = bool(content.output_transcription.finished)
-                flat_msg = {
-                    "type": "input_transcription",
-                    "event_id": f"evt_{uuid4()}",
-                    "utterance_id": self._current_utterance_id + "_zh",
-                    "speaker": "pharmacist",
-                    "language": "zh",
-                    "text": text,
-                    "revision": 1,
-                    "final": finished,
-                }
-                event = GeminiLiveAdapter.map_provider_message(flat_msg)
-                await self._queue.put(event)
 
             # Chinese generated audio
             if content.model_turn and content.model_turn.parts:
@@ -181,8 +168,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                                 "event_id": f"evt_{uuid4()}",
                                 "data_b64": encoded,
                             }
-                            event = GeminiLiveAdapter.map_provider_message(flat_msg)
-                            await self._queue.put(event)
+                            audio_event = GeminiLiveAdapter.map_provider_message(flat_msg)
+                            await self._queue.put(audio_event)
 
 
 class GeminiLiveAdapter(GeminiLiveGateway):
@@ -214,7 +201,10 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             )
             
             # Connect using gemini-3.5-live-translate-preview
-            model_name = self._settings.gemini_live_translate_model or "gemini-3.5-live-translate-preview"
+            model_name = (
+                self._settings.gemini_live_translate_model
+                or "gemini-3.5-live-translate-preview"
+            )
             ctx = client.aio.live.connect(model=model_name, config=config)
             session = await ctx.__aenter__()
             
@@ -285,6 +275,22 @@ def _language(value: object) -> Literal["en", "zh", "unknown"]:
     if value in {"en", "zh", "unknown"}:
         return cast(Literal["en", "zh", "unknown"], value)
     return "unknown"
+
+
+def _merge_transcript_text(existing: str, incoming: str) -> str:
+    """Merge provider transcript deltas or cumulative partials into one utterance."""
+    current = existing.strip()
+    next_text = incoming.strip()
+    if not current:
+        return next_text
+    if not next_text:
+        return current
+    if next_text.startswith(current):
+        return next_text
+    if current.endswith(next_text):
+        return current
+    separator = "" if next_text[:1] in {".", ",", "?", "!", ":", ";"} else " "
+    return f"{current}{separator}{next_text}"
 
 
 def _stable_error_code(value: object) -> str:
