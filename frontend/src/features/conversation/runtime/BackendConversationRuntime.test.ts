@@ -11,6 +11,7 @@ import { AudioRecorder } from "./AudioRecorder";
 
 class FakeSocket implements RuntimeSocket {
   binaryType: BinaryType = "blob";
+  readyState: number = WebSocket.CONNECTING;
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
@@ -22,10 +23,12 @@ class FakeSocket implements RuntimeSocket {
   }
 
   close(): void {
+    this.readyState = WebSocket.CLOSED;
     this.onclose?.(new CloseEvent("close"));
   }
 
   emitOpen(): void {
+    this.readyState = WebSocket.OPEN;
     this.onopen?.(new Event("open"));
   }
 

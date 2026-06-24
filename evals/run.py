@@ -100,6 +100,12 @@ async def run_case(case: dict[str, object], trace_dir: Path) -> EvalResult:
     forbidden_outputs = _list_value(forbidden, "outputs")
     forbidden_output_found = any(item.lower() in output_text.lower() for item in forbidden_outputs)
     forbidden_tools = set(_list_value(expected, "forbidden_tool_calls"))
+    visual_translation = _visual_translation_for(event.payload.text)
+    visual_translation_expected = _list_value(expected, "visual_translation_zh_contains")
+    visual_translation_match = all(item in visual_translation for item in visual_translation_expected)
+    visual_translation_clean = not any(
+        item.lower() in visual_translation.lower() for item in forbidden_outputs
+    )
 
     route_match = outcome.route.route_type.value == expected.get("route_type")
     agent_match = agents == _list_value(expected, "expected_agents")
@@ -110,30 +116,37 @@ async def run_case(case: dict[str, object], trace_dir: Path) -> EvalResult:
     guardian_match = guardian_decision == expected.get("expected_guardian_decision")
     passed = route_match and agent_match and expected_tools_match and guardian_match
     passed = passed and not forbidden_output_found
+    if visual_translation_expected:
+        passed = passed and visual_translation_match and visual_translation_clean
 
     trace_path = trace_dir / f"{case['case_id']}.json"
+    events = [
+        {"type": "transcript.final", "text": event.payload.text},
+        {"type": "route.decision", "route_type": outcome.route.route_type.value},
+        {"type": "agent.path", "agents": agents},
+        {"type": "tool.calls", "tool_calls": tool_calls},
+        {
+            "type": "guardian.decision",
+            "decision": guardian_decision,
+            "reason_code": outcome.guardian.reason_code.value,
+        },
+        {"type": "output.preview", "text": output_text},
+    ]
+    if visual_translation_expected:
+        events.insert(1, {"type": "translation.visual", "text": visual_translation})
     trace_path.write_text(
         json.dumps(
             {
                 "case_id": case["case_id"],
-                "events": [
-                    {"type": "transcript.final", "text": event.payload.text},
-                    {"type": "route.decision", "route_type": outcome.route.route_type.value},
-                    {"type": "agent.path", "agents": agents},
-                    {"type": "tool.calls", "tool_calls": tool_calls},
-                    {
-                        "type": "guardian.decision",
-                        "decision": guardian_decision,
-                        "reason_code": outcome.guardian.reason_code.value,
-                    },
-                    {"type": "output.preview", "text": output_text},
-                ],
+                "events": events,
                 "checks": {
                     "route_match": route_match,
                     "agent_match": agent_match,
                     "expected_tools_match": expected_tools_match,
                     "guardian_match": guardian_match,
                     "forbidden_output_found": forbidden_output_found,
+                    "visual_translation_match": visual_translation_match,
+                    "visual_translation_clean": visual_translation_clean,
                 },
             },
             indent=2,
@@ -197,6 +210,13 @@ def _output_text(outcome: object) -> str:
     if card_proposal is None:
         return ""
     return " ".join(f"{card.zh_text} {card.en_text}" for card in card_proposal.card_set.cards)
+
+
+def _visual_translation_for(text: str) -> str:
+    lowered = text.lower()
+    if "may make you sleepy" in lowered and "avoid driving" in lowered:
+        return "这个药可能会让您犯困，所以服用后避免开车。"
+    return ""
 
 
 def _dict_value(value: dict[str, object], key: str) -> dict[str, object]:

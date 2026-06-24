@@ -24,6 +24,7 @@ const envelopeSchema = z
 
 export interface RuntimeSocket {
   binaryType: BinaryType;
+  readyState: number;
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
@@ -153,7 +154,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
       if (message.data instanceof ArrayBuffer) {
         this.audioPlayer?.play(message.data);
       } else if (message.data instanceof Blob) {
-        message.data.arrayBuffer().then((buf) => {
+        void message.data.arrayBuffer().then((buf) => {
           this.audioPlayer?.play(buf);
         });
       }

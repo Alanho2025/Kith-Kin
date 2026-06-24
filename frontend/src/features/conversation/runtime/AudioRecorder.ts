@@ -1,6 +1,20 @@
+type WindowWithWebkitAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+function getAudioContextConstructor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.AudioContext ?? (window as WindowWithWebkitAudioContext).webkitAudioContext;
+}
+
+function createAudioContext(): AudioContext {
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) throw new Error("AUDIO_CONTEXT_UNAVAILABLE");
+  return new AudioContextConstructor();
+}
+
 const isBrowser =
-  typeof window !== "undefined" &&
-  typeof window.AudioContext !== "undefined" &&
+  getAudioContextConstructor() !== undefined &&
   typeof navigator !== "undefined" &&
   typeof navigator.mediaDevices !== "undefined";
 
@@ -23,7 +37,7 @@ export class AudioRecorder {
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Create context with sampleRate 16000 directly if browser supports it,
       // otherwise use default and downsample in ScriptProcessor
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      this.audioContext = createAudioContext();
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
       // Using ScriptProcessorNode (known tech debt, simple for demo integration)
