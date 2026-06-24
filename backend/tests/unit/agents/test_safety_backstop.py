@@ -25,6 +25,15 @@ def test_prompt_injection_is_blocked() -> None:
     assert reason is BackstopReason.PROMPT_INJECTION
 
 
+def test_passive_side_effect_explanation_is_allowed_for_translation_only() -> None:
+    result, _risk, reason = screen_turn_text(
+        "This medicine may make you sleepy, so avoid driving after taking it."
+    )
+
+    assert result is SafetyBackstopResult.ALLOW
+    assert reason is BackstopReason.NONE
+
+
 @pytest.mark.parametrize(
     "text",
     [
