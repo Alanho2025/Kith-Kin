@@ -292,7 +292,36 @@ class CompanionAgent(Agent):
             
             text_lower = event.payload.text.lower()
             
-            if "listen to pro" in text_lower or "lisinopril" in text_lower:
+            if "save the summary" in text_lower or "save this" in text_lower:
+                mock_card = ResponseCard(
+                    card_id=f"card_{uuid4()}",
+                    card_type=CardType.MEMORY_ACTION,
+                    zh_text="是否保存这次药房记录？确认后保存。",
+                    en_text="Save this pharmacy visit summary after confirmation.",
+                    risk_level=CardRiskLevel.MEDICAL,
+                    action=CardAction(type=CardActionType.SAVE_MEMORY),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id=guardian_decision_id,
+                )
+            elif (
+                "send this to my daughter" in text_lower
+                or "send this to my son" in text_lower
+                or "send this to my family" in text_lower
+                or "notify family" in text_lower
+            ):
+                mock_card = ResponseCard(
+                    card_id=f"card_{uuid4()}",
+                    card_type=CardType.FAMILY_ACTION,
+                    zh_text="是否发送药房沟通摘要给家人？",
+                    en_text="Send this pharmacy summary to family after confirmation.",
+                    risk_level=CardRiskLevel.MEDICAL,
+                    action=CardAction(type=CardActionType.NOTIFY_FAMILY),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id=guardian_decision_id,
+                )
+            elif "listen to pro" in text_lower or "lisinopril" in text_lower:
                 mock_card = ResponseCard(
                     card_id=f"card_{uuid4()}",
                     card_type=CardType.ASK_QUESTION,
