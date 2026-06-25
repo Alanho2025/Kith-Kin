@@ -55,6 +55,10 @@ RESPONSE_NEEDED_MARKERS = (
     "pick up",
     "refill",
 )
+PASSIVE_TRANSLATION_MARKERS = (
+    "may make you sleepy",
+    "avoid driving",
+)
 
 
 class RouterAgent(BaseAgent):
@@ -99,6 +103,12 @@ class RouterAgent(BaseAgent):
                 route_type=RouteType.FALLBACK,
                 confidence=0.95,
                 reason_code=RouteReasonCode.ROUTER_FALLBACK,
+            )
+        if any(marker in text_lower for marker in PASSIVE_TRANSLATION_MARKERS):
+            return RouteDecision(
+                route_type=RouteType.PASSIVE_TRANSLATION,
+                confidence=0.84,
+                reason_code=RouteReasonCode.ROUTINE_TRANSLATION,
             )
         if any(marker in text_lower for marker in PRIVACY_MARKERS):
             return RouteDecision(

@@ -123,6 +123,12 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.ADDRESS_REQUEST,
         )
+    passive_medical_explanation_markers = (
+        "may make you sleepy",
+        "avoid driving",
+    )
+    if any(marker in lowered for marker in passive_medical_explanation_markers):
+        return SafetyBackstopResult.ALLOW, BackstopRisk.NORMAL, BackstopReason.NONE
     medical_confirmation_markers = (
         "stop taking",
         "change your dose",

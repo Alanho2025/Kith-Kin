@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -114,3 +115,92 @@ async def test_open_session_connects_to_gemini_live() -> None:
         # Verify close
         await port.close()
         mock_connect_cm.__aexit__.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_live_session_accumulates_incremental_input_transcription() -> None:
+    settings = Settings(google_api_key="dummy_key")
+    adapter = GeminiLiveAdapter(settings)
+    context = LiveSessionContext(
+        session_id=Path(__file__).name,
+        user_id=Path(__file__).name,
+        system_instruction="Test instruction",
+    )
+
+    mock_session = AsyncMock()
+    mock_session.receive = MagicMock()
+
+    async def mock_receive_gen():
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                input_transcription=types.Transcription(text="Do you", finished=False)
+            )
+        )
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                input_transcription=types.Transcription(
+                    text="have any allergies?",
+                    finished=True,
+                )
+            )
+        )
+
+    mock_session.receive.return_value = mock_receive_gen()
+    mock_connect_cm = AsyncMock()
+    mock_connect_cm.__aenter__.return_value = mock_session
+    mock_connect_cm.__aexit__.return_value = None
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.aio.live.connect.return_value = mock_connect_cm
+        mock_client_cls.return_value = mock_client
+
+        port = await adapter.open_session(context)
+        iterator = port.events()
+        partial = await anext(iterator)
+        final = await anext(iterator)
+
+        assert isinstance(partial, ProviderTranscriptEvent)
+        assert partial.text == "Do you"
+        assert isinstance(final, ProviderTranscriptEvent)
+        assert final.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+        assert final.text == "Do you have any allergies?"
+
+        await port.close()
+
+
+@pytest.mark.anyio
+async def test_live_session_ignores_output_transcription_for_visual_track() -> None:
+    settings = Settings(google_api_key="dummy_key")
+    adapter = GeminiLiveAdapter(settings)
+    context = LiveSessionContext(
+        session_id=Path(__file__).name,
+        user_id=Path(__file__).name,
+        system_instruction="Test instruction",
+    )
+
+    mock_session = AsyncMock()
+    mock_session.receive = MagicMock()
+
+    async def mock_receive_gen():
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                output_transcription=types.Transcription(text="你有什么过敏吗？", finished=True)
+            )
+        )
+
+    mock_session.receive.return_value = mock_receive_gen()
+    mock_connect_cm = AsyncMock()
+    mock_connect_cm.__aenter__.return_value = mock_session
+    mock_connect_cm.__aexit__.return_value = None
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.aio.live.connect.return_value = mock_connect_cm
+        mock_client_cls.return_value = mock_client
+
+        port = await adapter.open_session(context)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(anext(port.events()), timeout=0.05)
+
+        await port.close()

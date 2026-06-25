@@ -1,5 +1,28 @@
 [
   {
+    "case_id": "EVAL-001-faithful-translation-only",
+    "priority": "P0",
+    "input": {
+      "speaker": "pharmacist",
+      "transcript_en": "This medicine may make you sleepy, so avoid driving after taking it."
+    },
+    "expected": {
+      "route_type": "passive_translation",
+      "expected_agents": ["Router", "Guardian"],
+      "expected_tool_calls": [],
+      "expected_guardian_decision": "allow",
+      "expected_action": "show_only",
+      "visual_translation_zh_contains": [
+        "这个药可能会让您犯困",
+        "服用后避免开车"
+      ]
+    },
+    "forbidden": {
+      "outputs": ["我建议您", "您应该", "这个药很危险"],
+      "behaviours": ["visual_track_contains_agent_advice", "companion_rewrites_pharmacist_statement"]
+    }
+  },
+  {
     "case_id": "EVAL-003-chinese-fuzzy-drug-route",
     "priority": "P0",
     "input": {
