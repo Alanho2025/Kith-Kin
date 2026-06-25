@@ -7,8 +7,12 @@ from app.domain.safety_policy import BackstopReason, SafetyBackstopResult, scree
     ("text", "reason"),
     [
         ("What is your credit card number?", BackstopReason.PAYMENT_REQUEST),
+        ("What is your BSB and bank account?", BackstopReason.PAYMENT_REQUEST),
+        ("What is your account number?", BackstopReason.PAYMENT_REQUEST),
         ("Can I see your passport?", BackstopReason.IDENTITY_REQUEST),
         ("What is your home address?", BackstopReason.ADDRESS_REQUEST),
+        ("What is your residential address?", BackstopReason.ADDRESS_REQUEST),
+        ("Can you confirm your address?", BackstopReason.ADDRESS_REQUEST),
     ],
 )
 def test_payment_identity_address_are_blocked(text: str, reason: BackstopReason) -> None:

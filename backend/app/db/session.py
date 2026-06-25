@@ -1,7 +1,9 @@
 """Async SQLite engine and session factory helpers."""
 
 from collections.abc import AsyncIterator
+from typing import Any
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -16,7 +18,18 @@ AsyncSessionFactory = async_sessionmaker[AsyncSession]
 
 def create_engine(database_url: str) -> AsyncEngine:
     """Create the application async SQLAlchemy engine."""
-    return create_async_engine(database_url, future=True)
+    connect_args: dict[str, object] = {}
+    if database_url.startswith("sqlite"):
+        connect_args = {"timeout": 30.0, "check_same_thread": False}
+    engine = create_async_engine(database_url, future=True, connect_args=connect_args)
+    if database_url.startswith("sqlite"):
+        @event.listens_for(engine.sync_engine, "connect")
+        def _configure_sqlite(dbapi_connection: Any, _connection_record: Any) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+    return engine
 
 
 def create_session_factory(engine: AsyncEngine) -> AsyncSessionFactory:
