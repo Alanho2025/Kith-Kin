@@ -116,7 +116,11 @@ class TurnOrchestrator:
             guardian = guardian_task.result()
             if guardian.decision is GuardianDecisionType.BLOCK:
                 return TurnOutcome(route, guardian, None, None)
-            _NO_COMPANION_ROUTES = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
+            _NO_COMPANION_ROUTES = {
+                RouteType.PASSIVE_TRANSLATION,
+                RouteType.PRIVACY_RISK,
+                RouteType.FALLBACK,
+            }
             if route.route_type in _NO_COMPANION_ROUTES:
                 return TurnOutcome(route, guardian, None, None)
 
@@ -137,7 +141,11 @@ class TurnOrchestrator:
         guardian = guardian_task.result()
         if guardian.decision is GuardianDecisionType.BLOCK:
             return TurnOutcome(route, guardian, None, None)
-        no_companion_routes = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
+        no_companion_routes = {
+            RouteType.PASSIVE_TRANSLATION,
+            RouteType.PRIVACY_RISK,
+            RouteType.FALLBACK,
+        }
         if route.route_type in no_companion_routes:
             return TurnOutcome(route, guardian, None, None)
 
@@ -267,7 +275,11 @@ class TurnOrchestrator:
         route = RouteDecision.model_validate(route_data)
         guardian = GuardianDecision.model_validate(guardian_data)
 
-        _NO_COMPANION_ROUTES = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
+        _NO_COMPANION_ROUTES = {
+            RouteType.PASSIVE_TRANSLATION,
+            RouteType.PRIVACY_RISK,
+            RouteType.FALLBACK,
+        }
         proposal = None
         card_review = None
 

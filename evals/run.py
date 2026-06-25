@@ -90,6 +90,8 @@ async def run_case(case: dict[str, object], trace_dir: Path) -> EvalResult:
 
     expected = _dict_value(case, "expected")
     agents = ["Router", "Guardian"]
+    if outcome.route.route_type.value == "fallback":
+        agents = ["Guardian"]
     if outcome.card_proposal is not None:
         agents.append("Companion")
     tool_calls = _planned_tool_calls(event.payload.text, agents)
@@ -112,22 +114,32 @@ async def run_case(case: dict[str, object], trace_dir: Path) -> EvalResult:
     passed = passed and not forbidden_output_found
 
     trace_path = trace_dir / f"{case['case_id']}.json"
+    events = [
+        {"type": "transcript.final", "text": event.payload.text},
+        {"type": "route.decision", "route_type": outcome.route.route_type.value},
+        {"type": "agent.path", "agents": agents},
+        {"type": "tool.calls", "tool_calls": tool_calls},
+        *[
+            {
+                "type": "tool.call",
+                "tool_name": tool,
+                "access": "write" if tool in {"memory_write", "notify_family"} else "read",
+            }
+            for tool in tool_calls
+        ],
+        {
+            "type": "guardian.decision",
+            "decision": guardian_decision,
+            "reason_code": outcome.guardian.reason_code.value,
+        },
+        {"type": "output.preview", "text": output_text},
+    ]
+
     trace_path.write_text(
         json.dumps(
             {
                 "case_id": case["case_id"],
-                "events": [
-                    {"type": "transcript.final", "text": event.payload.text},
-                    {"type": "route.decision", "route_type": outcome.route.route_type.value},
-                    {"type": "agent.path", "agents": agents},
-                    {"type": "tool.calls", "tool_calls": tool_calls},
-                    {
-                        "type": "guardian.decision",
-                        "decision": guardian_decision,
-                        "reason_code": outcome.guardian.reason_code.value,
-                    },
-                    {"type": "output.preview", "text": output_text},
-                ],
+                "events": events,
                 "checks": {
                     "route_match": route_match,
                     "agent_match": agent_match,
@@ -178,6 +190,15 @@ def _planned_tool_calls(text: str, agents: list[str]) -> list[str]:
     if "Companion" not in agents:
         return []
     lowered = text.lower()
+    if "save the summary" in lowered or "save this" in lowered:
+        return ["memory_write"]
+    if (
+        "send this to my daughter" in lowered
+        or "send this to my son" in lowered
+        or "send this to my family" in lowered
+        or "notify family" in lowered
+    ):
+        return ["notify_family"]
     calls = ["memory_search"]
     if "ibuprofen" in lowered or "lisinopril" in lowered:
         calls.append("check_drug_interaction")
