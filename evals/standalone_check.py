@@ -32,17 +32,18 @@ CASES_PATH = ROOT / "evals" / "cases.json"
 
 REQUIRED_CASE_FIELDS = {"case_id", "priority", "input", "expected", "forbidden"}
 VALID_PRIORITIES = {"P0", "P1"}
-VALID_SPEAKERS = {"pharmacist", "parent", "clerk"}
+VALID_SPEAKERS = {"pharmacist", "parent", "clerk", "unknown"}
 VALID_ROUTE_TYPES = {
     "pharmacy_risk", "privacy_risk", "response_needed",
-    "passive_translation", "block",
+    "passive_translation", "block", "family_action", "fallback",
 }
 VALID_GUARDIAN = {
     "block", "require_parent_confirmation", "allow",
 }
 VALID_ACTIONS = {
     "ask_pharmacist_to_confirm", "ask_pharmacist_to_write_down",
-    "block", "ask_question",
+    "block", "ask_question", "save_after_confirmation",
+    "notify_after_confirmation", "no_agent_speech", "show_only",
 }
 
 
