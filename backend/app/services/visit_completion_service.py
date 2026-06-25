@@ -29,6 +29,9 @@ class VisitCompletionService:
         self._get_session_events = get_session_events
         self._draft_summaries: dict[UUID, SummaryReview] = {}
 
+    def discard_session(self, session_id: UUID) -> None:
+        self._draft_summaries.pop(session_id, None)
+
     async def prepare_summary(
         self,
         session_id: UUID,

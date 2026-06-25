@@ -102,8 +102,12 @@ export class BackendConversationRuntime implements ConversationRuntime {
     this.audioRecorder = new AudioRecorder();
 
     await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => resolve();
+      socket.onopen = () => {
+        socket.onclose = null;
+        resolve();
+      };
       socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
+      socket.onclose = () => reject(new Error("RUNTIME_DISCONNECTED"));
     });
 
     if (generation !== this.connectionGeneration) {

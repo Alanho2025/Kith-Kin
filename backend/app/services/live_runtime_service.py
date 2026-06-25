@@ -74,6 +74,10 @@ class LiveRuntimeService:
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
         self._speech_sessions: set[UUID] = set()
 
+    def discard_session(self, session_id: UUID) -> None:
+        self._buffers.pop(session_id, None)
+        self._speech_sessions.discard(session_id)
+
     async def serve(
         self,
         websocket: WebSocket,
@@ -481,11 +485,19 @@ class LiveRuntimeService:
             return
 
         try:
-            await asyncio.gather(
-                self._read_client_loop(websocket, session_id, port),
-                self._read_provider_loop(websocket, session_id, port),
-            )
+            tasks = {
+                asyncio.create_task(self._read_client_loop(websocket, session_id, port)),
+                asyncio.create_task(self._read_provider_loop(websocket, session_id, port)),
+            }
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
         except WebSocketDisconnect:
+            pass
+        except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.warning("Live transport error in serving loops: %s", e)
@@ -587,6 +599,9 @@ class LiveRuntimeService:
                             },
                         )
                         await websocket.send_json(trans_final_evt)
+                        outcomes = await self.handle_provider_event(session_id, event)
+                        for out in outcomes:
+                            await websocket.send_json(out)
                 elif event.utterance_id == "turn_complete":
                     if model_speaking or session_id in self._speech_sessions:
                         model_speaking = False

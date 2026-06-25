@@ -19,6 +19,10 @@ class SessionService:
         self._clock = clock
         self._visit_repository = visit_repository
         self.prefetch_cache: dict[UUID, list[dict[str, Any]]] = {}
+        self._cleanup_callbacks: list[Callable[[UUID], None]] = []
+
+    def register_cleanup_callback(self, callback: Callable[[UUID], None]) -> None:
+        self._cleanup_callbacks.append(callback)
 
     async def create(
         self,
@@ -53,4 +57,7 @@ class SessionService:
         ended = await self._store.mark_ended(session_id, self._clock())
         if ended is None:
             raise SessionNotConnectableError
+        self.prefetch_cache.pop(session_id, None)
+        for callback in self._cleanup_callbacks:
+            callback(session_id)
         return ended
