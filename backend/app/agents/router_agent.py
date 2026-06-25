@@ -13,12 +13,16 @@ PHARMACY_MARKERS = (
     "medicine",
     "medication",
     "drug",
+    "take this",
+    "headache",
     "allergy",
     "allergies",
     "antibiotic",
     "lisinopril",
     "ibuprofen",
     "dose",
+    "药",
+    "降血压",
 )
 PRIVACY_MARKERS = (
     "credit card",
@@ -26,9 +30,25 @@ PRIVACY_MARKERS = (
     "medicare",
     "home address",
     "cvv",
+    "api key",
+    "password",
+    "secret",
+    "token",
     "ignore previous",
     "system prompt",
     "developer message",
+)
+FAMILY_ACTION_MARKERS = (
+    "save the summary",
+    "save this",
+    "send this to my daughter",
+    "send this to my son",
+    "send this to my family",
+    "notify family",
+)
+FALLBACK_MARKERS = (
+    "kk is speaking",
+    "selected response card",
 )
 RESPONSE_NEEDED_MARKERS = (
     "prescription",
@@ -74,11 +94,23 @@ class RouterAgent(BaseAgent):
 
     def _classify(self, text: str) -> RouteDecision:
         text_lower = text.lower()
+        if any(marker in text_lower for marker in FALLBACK_MARKERS):
+            return RouteDecision(
+                route_type=RouteType.FALLBACK,
+                confidence=0.95,
+                reason_code=RouteReasonCode.ROUTER_FALLBACK,
+            )
         if any(marker in text_lower for marker in PRIVACY_MARKERS):
             return RouteDecision(
                 route_type=RouteType.PRIVACY_RISK,
                 confidence=0.96,
                 reason_code=RouteReasonCode.PRIVACY_REQUEST,
+            )
+        if any(marker in text_lower for marker in FAMILY_ACTION_MARKERS):
+            return RouteDecision(
+                route_type=RouteType.FAMILY_ACTION,
+                confidence=0.9,
+                reason_code=RouteReasonCode.FAMILY_SUMMARY,
             )
         if any(marker in text_lower for marker in PHARMACY_MARKERS):
             return RouteDecision(
