@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.domain.confirmation import (
     CardConfirmationError,
@@ -36,6 +36,17 @@ class CardService:
         self._card_contexts: dict[str, TrustedRequestContext] = {}
         self._lock = asyncio.Lock()
         self._confirm_lock = asyncio.Lock()
+
+    def discard_session(self, session_id: UUID) -> None:
+        sid = str(session_id)
+        self._card_sets = {
+            key: value for key, value in self._card_sets.items() if key[0] != sid
+        }
+        self._card_contexts = {
+            key: value
+            for key, value in self._card_contexts.items()
+            if value.session_id != session_id
+        }
 
     def register_card_set(self, card_set: CardSet, context: TrustedRequestContext) -> None:
         """Store an approved card set for later selection; no action is executed."""

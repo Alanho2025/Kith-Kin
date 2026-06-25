@@ -130,6 +130,22 @@ describe("BackendConversationRuntime", () => {
     expect(JSON.stringify(events)).not.toContain("encoded_ticket");
   });
 
+  it("rejects connect when the websocket closes before opening", async () => {
+    const fetchFn: typeof fetch = () => Promise.resolve(new Response(null, { status: 201 }));
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-1");
+    await Promise.resolve();
+    socket.close();
+
+    await expect(connected).rejects.toThrow("RUNTIME_DISCONNECTED");
+  });
+
   it("plays binary messages and handles audio.muted events", async () => {
     const playSpy = vi.spyOn(AudioPlayer.prototype, "play").mockImplementation(() => {});
     const startPlayerSpy = vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
