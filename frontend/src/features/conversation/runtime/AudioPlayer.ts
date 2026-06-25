@@ -1,5 +1,19 @@
-const isBrowser =
-  typeof window !== "undefined" && typeof window.AudioContext !== "undefined";
+type WindowWithWebkitAudioContext = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+function getAudioContextConstructor(): typeof AudioContext | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.AudioContext ?? (window as WindowWithWebkitAudioContext).webkitAudioContext;
+}
+
+function createAudioContext(): AudioContext {
+  const AudioContextConstructor = getAudioContextConstructor();
+  if (!AudioContextConstructor) throw new Error("AUDIO_CONTEXT_UNAVAILABLE");
+  return new AudioContextConstructor();
+}
+
+const isBrowser = getAudioContextConstructor() !== undefined;
 
 export class AudioPlayer {
   private audioContext: AudioContext | null = null;
@@ -8,7 +22,7 @@ export class AudioPlayer {
   start(): void {
     if (!isBrowser) return;
     if (this.audioContext) return;
-    this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    this.audioContext = createAudioContext();
     this.nextPlayTime = 0;
   }
 

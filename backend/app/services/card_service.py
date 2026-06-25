@@ -45,6 +45,22 @@ class CardService:
         self._card_sets[(str(context.session_id), card_set.card_set_id)] = card_set
         self._card_contexts[card_set.card_set_id] = context
 
+    def get_card_by_confirmation(
+        self,
+        confirmation_id: str,
+        context: TrustedRequestContext,
+    ) -> ResponseCard:
+        """Return the server-owned card for a scoped confirmation."""
+        record = self._repository.get(confirmation_id)
+        if record is None:
+            raise CardConfirmationError("CARD_NOT_FOUND")
+        if record.session_id != context.session_id or record.user_id != context.user_id:
+            raise CardConfirmationError("CONFIRMATION_SCOPE_INVALID")
+        card_set = self._card_sets.get((str(context.session_id), record.card_set_id))
+        if card_set is None:
+            raise CardConfirmationError("CARD_NOT_FOUND")
+        return _find_card(card_set, record.card_id)
+
     async def select(
         self,
         command: CardSelectCommand,

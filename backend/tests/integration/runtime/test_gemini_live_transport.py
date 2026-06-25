@@ -1,13 +1,29 @@
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
+from app.adapters.provider_schemas import (
+    ProviderAudioEvent,
+    ProviderLiveEventType,
+    ProviderTranscriptEvent,
+)
 from app.core.config import Settings
+from app.core.constants import CardRiskLevel, GuardianDecisionType
+from app.domain.confirmation import CardSelectCommand
+from app.domain.credentials import TrustedRequestContext
 from app.main import create_app
+from app.schemas.agent_outputs import (
+    GuardianDecision,
+    GuardianReasonCode,
+    RouteDecision,
+    RouteReasonCode,
+    RouteType,
+)
+from app.services.turn_orchestrator import TurnOutcome
+from tests.fixtures.cards.approved_card_sets import approved_card_set
 from tests.fixtures.clock import MutableClock
 from tests.fixtures.signing import TEST_SIGNING_KEY
 from tests.integration.api.conftest import ORIGIN, create_session, issue_ticket
@@ -29,6 +45,18 @@ class MockSessionPort(AsyncMock):
 
     async def close(self) -> None:
         self._closed = True
+
+
+class CapturingWebSocket:
+    def __init__(self) -> None:
+        self.json_events: list[dict[str, object]] = []
+        self.binary_events: list[bytes] = []
+
+    async def send_json(self, event: dict[str, object]) -> None:
+        self.json_events.append(event)
+
+    async def send_bytes(self, event: bytes) -> None:
+        self.binary_events.append(event)
 
 
 @pytest.fixture
@@ -93,22 +121,24 @@ async def test_agent_failure_does_not_close_live_audio_transport(
     ) as socket:
         socket.receive_json()  # ready
         socket.receive_json()  # listening
-        socket.send_json({
-            "schema_version": "0.1",
-            "event_id": "evt-client-agent-failure",
-            "event_type": "transcript.final",
-            "session_id": session_id,
-            "sequence": 3,
-            "timestamp": "2026-06-22T13:00:00Z",
-            "correlation_id": None,
-            "payload": {
-                "utterance_id": "utt-agent-failure",
-                "speaker": "pharmacist",
-                "language": "en",
-                "text": "How are you?",
-                "revision": 1,
-            },
-        })
+        socket.send_json(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-client-agent-failure",
+                "event_type": "transcript.final",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {
+                    "utterance_id": "utt-agent-failure",
+                    "speaker": "pharmacist",
+                    "language": "en",
+                    "text": "How are you?",
+                    "revision": 1,
+                },
+            }
+        )
 
         fallback = socket.receive_json()
         while fallback["event_type"] != "fallback.show":
@@ -137,33 +167,109 @@ async def test_live_transport_guardian_gates_before_speak(live_app_client: TestC
         socket.receive_json()  # listening
 
         # Send a forged confirm event for a non-existent card
-        socket.send_json({
-            "schema_version": "0.1",
-            "event_id": "evt-client-1",
-            "event_type": "card.confirmed",
-            "session_id": session_id,
-            "sequence": 3,
-            "timestamp": "2026-06-22T13:00:00Z",
-            "correlation_id": None,
-            "payload": {
-                "confirmation_id": "confirmation_invalid_or_blocked",
-                "action_type": "speak"
+        socket.send_json(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-client-1",
+                "event_type": "card.confirmed",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {
+                    "confirmation_id": "confirmation_invalid_or_blocked",
+                    "action_type": "speak",
+                },
             }
-        })
+        )
 
         await asyncio.sleep(0.1)
         port.send_text.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_live_transport_blocked_turn_results_in_guardian_warning_and_no_speech(live_app_client: TestClient) -> None:
-    from app.services.turn_orchestrator import TurnOutcome
-    from app.schemas.agent_outputs import GuardianDecision, RouteDecision, RouteType, RouteReasonCode, GuardianReasonCode
-    from app.core.constants import GuardianDecisionType, CardRiskLevel
+async def test_provider_audio_is_ignored_until_card_confirmation(
+    live_app_client: TestClient,
+) -> None:
+    port = MockSessionPort()
+    port._events_list.append(
+        ProviderAudioEvent(
+            event_type=ProviderLiveEventType.AUDIO,
+            provider_event_id="provider-audio-unsolicited",
+            audio=b"\x01\x02",
+        )
+    )
+    port._closed = True
+    websocket = CapturingWebSocket()
+    service = live_app_client.app.state.live_runtime_service
+    session_id = create_session(live_app_client)
 
+    await service._read_provider_loop(websocket, session_id, port)
+
+    assert websocket.binary_events == []
+    assert websocket.json_events == []
+
+
+@pytest.mark.anyio
+async def test_card_confirmation_is_the_only_path_that_requests_english_audio(
+    live_app_client: TestClient,
+) -> None:
     gateway = live_app_client.app.state.mock_live_gateway
     port = MockSessionPort()
-    
+    gateway.open_session.return_value = port
+    clock = MutableClock()
+
+    session_id = create_session(live_app_client)
+    issue_ticket(live_app_client, session_id)
+    request_context = TrustedRequestContext(
+        session_id=UUID(session_id),
+        user_id=live_app_client.app.state.user_id,
+        origin="test",
+    )
+    card_set = approved_card_set(clock)
+    live_app_client.app.state.card_service.register_card_set(card_set, request_context)
+    selected = await live_app_client.app.state.card_service.select(
+        CardSelectCommand(
+            card_set.card_set_id,
+            card_set.cards[0].card_id,
+            card_set.revision,
+        ),
+        request_context,
+    )
+
+    with live_app_client.websocket_connect(
+        f"/api/sessions/{session_id}/live",
+        headers={"origin": ORIGIN},
+    ) as socket:
+        socket.receive_json()
+        socket.receive_json()
+        socket.send_json(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-card-confirm",
+                "event_type": "card.confirm",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {"confirmation_id": selected.confirmation_id},
+            }
+        )
+        confirmed = socket.receive_json()
+        assert confirmed["event_type"] == "card.confirmed"
+        assert socket.receive_json()["event_type"] == "audio.muted"
+        assert socket.receive_json()["event_type"] == "audio.speaking"
+
+    port.send_text.assert_awaited_once_with(card_set.cards[0].en_text)
+
+
+@pytest.mark.anyio
+async def test_live_transport_blocked_turn_results_in_guardian_warning_and_no_speech(
+    live_app_client: TestClient,
+) -> None:
+    gateway = live_app_client.app.state.mock_live_gateway
+    port = MockSessionPort()
+
     # Mock TurnOrchestrator to return a blocked turn outcome to avoid calling the real LLM/network
     live_app_client.app.state.turn_orchestrator.process_final_turn = AsyncMock(
         return_value=TurnOutcome(
@@ -184,15 +290,17 @@ async def test_live_transport_blocked_turn_results_in_guardian_warning_and_no_sp
     )
 
     # Simulate a provider final transcript that violates privacy
-    port._events_list.append(ProviderTranscriptEvent(
-        event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
-        provider_event_id="prov-evt-blocked",
-        utterance_id="blocked_turn_1",
-        speaker="pharmacist",
-        language="en",
-        text="Could you please give me your credit card number?",
-        revision=1,
-    ))
+    port._events_list.append(
+        ProviderTranscriptEvent(
+            event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+            provider_event_id="prov-evt-blocked",
+            utterance_id="blocked_turn_1",
+            speaker="pharmacist",
+            language="en",
+            text="Could you please give me your credit card number?",
+            revision=1,
+        )
+    )
     gateway.open_session.return_value = port
 
     session_id = create_session(live_app_client)
