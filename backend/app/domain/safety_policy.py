@@ -95,7 +95,14 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.MEDICAL,
             BackstopReason.MEDICAL_ADVICE,
         )
-    if any(marker in lowered for marker in ("credit card", "card number", "cvv")):
+    if any(marker in lowered for marker in (
+        "credit card",
+        "card number",
+        "cvv",
+        "bsb",
+        "bank account",
+        "account number",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
@@ -117,7 +124,13 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.IDENTITY_REQUEST,
         )
-    if any(marker in lowered for marker in ("home address", "where do you live", "street address")):
+    if any(marker in lowered for marker in (
+        "home address",
+        "where do you live",
+        "street address",
+        "residential address",
+        "your address",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,

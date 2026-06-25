@@ -51,12 +51,19 @@ class CapturingWebSocket:
     def __init__(self) -> None:
         self.json_events: list[dict[str, object]] = []
         self.binary_events: list[bytes] = []
+        self._received = False
 
     async def send_json(self, event: dict[str, object]) -> None:
         self.json_events.append(event)
 
     async def send_bytes(self, event: bytes) -> None:
         self.binary_events.append(event)
+
+    async def receive(self) -> dict[str, object]:
+        if self._received:
+            await asyncio.sleep(3600)
+        self._received = True
+        return {"type": "websocket.disconnect"}
 
 
 @pytest.fixture
@@ -99,6 +106,19 @@ async def test_live_transport_fails_gracefully_on_open_error(live_app_client: Te
         fallback = socket.receive_json()
         assert fallback["event_type"] == "fallback.show"
         assert fallback["payload"]["code"] == "LIVE_UNAVAILABLE"
+
+
+@pytest.mark.anyio
+async def test_client_disconnect_closes_live_port(live_app_client: TestClient) -> None:
+    port = MockSessionPort()
+    service = live_app_client.app.state.live_runtime_service
+    websocket = CapturingWebSocket()
+    session_id = UUID("00000000-0000-4000-8000-000000000101")
+    service._live_gateway.open_session.return_value = port
+
+    await asyncio.wait_for(service._serve_real_live(websocket, session_id), timeout=1)
+
+    assert port._closed is True
 
 
 @pytest.mark.anyio
@@ -208,6 +228,49 @@ async def test_provider_audio_is_ignored_until_card_confirmation(
 
     assert websocket.binary_events == []
     assert websocket.json_events == []
+
+
+@pytest.mark.anyio
+async def test_chinese_provider_transcript_still_reaches_turn_orchestrator(
+    live_app_client: TestClient,
+) -> None:
+    port = MockSessionPort()
+    port._events_list.append(
+        ProviderTranscriptEvent(
+            event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+            provider_event_id="provider-zh",
+            utterance_id="utt-zh",
+            speaker="pharmacist",
+            language="zh",
+            text="请告诉我你的银行卡号",
+            revision=1,
+        )
+    )
+    port._closed = True
+    websocket = CapturingWebSocket()
+    service = live_app_client.app.state.live_runtime_service
+    session_id = create_session(live_app_client)
+    service._turn_orchestrator.process_final_turn = AsyncMock(
+        return_value=TurnOutcome(
+            route=RouteDecision(
+                route_type=RouteType.PRIVACY_RISK,
+                confidence=0.9,
+                reason_code=RouteReasonCode.PRIVACY_REQUEST,
+            ),
+            guardian=GuardianDecision(
+                guardian_decision_id="guardian-zh",
+                decision=GuardianDecisionType.BLOCK,
+                risk_level=CardRiskLevel.PRIVACY,
+                reason_code=GuardianReasonCode.IDENTITY_REQUEST,
+            ),
+            card_proposal=None,
+            card_review=None,
+        )
+    )
+
+    await service._read_provider_loop(websocket, UUID(session_id), port)
+
+    service._turn_orchestrator.process_final_turn.assert_awaited()
 
 
 @pytest.mark.anyio

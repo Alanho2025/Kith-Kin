@@ -111,6 +111,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                         retryable=True,
                     )
                 )
+        finally:
+            await self._queue.put(None)
 
     async def _process_message(self, msg: Any) -> None:
         # 1. Check for tool calls
