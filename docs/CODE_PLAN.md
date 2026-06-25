@@ -145,7 +145,7 @@ Final pass bar: all P0 evals, at least 80% P1, zero medical-advice violations, z
 - Phase 03: implemented and accepted with accessible mock runtime UI, reducer/hooks, confirmation/Guardian/fallback/summary flows, automated checks, post-fix cancel verification, and final 360px/1280px browser captures.
 - Phase 04: implemented and accepted with same-origin single-use app tickets, pre-accept verification, fake binary WebSocket flow, replay/resume, shared card confirmation, and frontend backend-runtime adapter.
 - Phase 05: implemented with SQLite schema/migration, scoped repositories, atomic ticket JTI consumption, bounded RAG, canonical MCP tool manifest/adapter, demo seed/cleanup, and redacted trace primitives.
-- Phase 06: fixture-backed implementation complete with provider-normalised Gemini Live events, faithful final-turn text translation sidecar, append-only translation runtime events, deduplication, timeout fallback, and task cleanup. Credential-backed real smoke is `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied.
+- Phase 06: SDK-backed implementation complete with provider-normalised Gemini Live events, a single backend-proxied Gemini 2.5 Flash Live session, faithful Gemini 2.5 Flash final-turn translation, append-only translation runtime events, deduplication, timeout fallback, and deterministic task cleanup. Credential-backed real smoke remains `blocked_missing_credentials` until `GOOGLE_API_KEY` is supplied.
 - Phase 07: implemented with concurrent Router/Guardian orchestration for each final turn, deterministic Guardian backstop screening, read-only Companion tooling, structured agent outputs, and Guardian review of proposed cards.
 - Phase 08: implemented with server-side card selection, one-time confirmations, idempotent replay, cancellation, runtime command handling, and half-duplex audio mute/speak/listen ordering.
 - Phases 09-11 and 90: planned, not started.
@@ -194,13 +194,13 @@ Recorded 2026-06-22:
 | Check | Result |
 |---|---|
 | Phase 05/06 focused backend tests | 17 passed |
-| Full backend pytest | 121 passed |
+| Full backend pytest | 163 passed on 2026-06-25 after remote integration and Live turn finalisation |
 | Ruff | all checks passed |
-| Mypy | 68 source files, no issues |
+| Mypy | 81 source files, no issues |
 | Migration round trip | upgrade -> downgrade -> upgrade covered by integration test |
 | Real Gemini Live/translation smoke | `blocked_missing_credentials`; `GOOGLE_API_KEY` not present |
 
-The Phase 06 production SDK session remains behind the `GeminiLiveAdapter` boundary and is not claimed without credentials. The public backend WebSocket shape remains unchanged.
+Recorded 2026-06-24: the configured models are `gemini-2.5-flash-native-audio-preview-12-2025` for the single Live session and `gemini-2.5-flash` for the faithful text sidecar. The SDK connection, 16 kHz PCM forwarding, input transcription normalisation, English-only sidecar routing, audio return path, low-thinking translation request, and close/cancellation path are covered with provider contract doubles. The real provider result is not claimed without credentials. The public backend WebSocket shape remains unchanged.
 
 ## Phase 07-08 Verification Record
 
@@ -218,3 +218,84 @@ Recorded 2026-06-22:
 | Deterministic eval runner | six Phase 07 cases pass with sanitised JSON traces |
 
 The Phase 07/08 implementation remains fixture-backed and deterministic. It does not claim real notification, real visit-summary writeback, or any external side effect before Phase 09.
+
+## Fifteen-Case Eval Gate
+
+Recorded 2026-06-24. This gate supersedes earlier references to an informal seven-case eval set.
+
+Product implementation must not be accepted by prose review alone. The executable contract is:
+
+```bash
+backend/.venv/Scripts/python.exe evals/run.py evals/cases.json \
+  --report evals/baseline_report.json
+```
+
+The suite contains exactly 15 architecture-derived cases. Every case declares:
+
+- expected Router decision
+- expected Guardian decision
+- exact expected MCP tool trajectory
+- forbidden output or side effect
+- human-readable pass criteria
+
+### Execution order
+
+1. Freeze `docs/ARCHITECTURE.md`, this plan, and `evals/cases.json`.
+2. Run and preserve the baseline before changing product code.
+3. Work one failing case at a time: RED, minimal GREEN, related regression.
+4. Run Option A first: one backend-proxied Gemini Live session plus Gemini Flash text sidecar.
+5. Activate Option B only after the documented Option A stop condition is observed and recorded.
+6. Require all P0 cases and all 15 total cases to pass before refactoring.
+7. Refactor only after the behaviour gate is green; rerun the identical suite afterward.
+
+### Option A stop conditions
+
+Option A is not rejected merely because a preview endpoint fails once. Record a fallback decision only when one of these occurs in the agreed validation window:
+
+- the selected Live model cannot complete the required function-call round trip;
+- final input transcription is unavailable or unusable;
+- translation-sidecar latency repeatedly exceeds the recorded threshold;
+- provider availability prevents a reproducible demo after bounded retries;
+- the same unresolved provider blocker is reproduced three times with no new diagnostic.
+
+### Option B
+
+Option B is the documented fallback, not a parallel implementation target. It may use the dedicated Live-translate path or the stable mock runtime while preserving the public WebSocket, runtime-event, Guardian, confirmation, and tool contracts.
+
+### Acceptance bar
+
+- 15/15 executable evals pass.
+- Every P0 case passes.
+- Zero medical-advice violations.
+- Zero automatic sensitive-data disclosures.
+- Zero unconfirmed write or external actions.
+- Tool trajectories are observable in the eval result.
+- Backend, frontend, secret scan, and clean-environment demo checks remain green.
+
+### Eval record
+
+Initial Windows baseline recorded 2026-06-24 before eval-driven product fixes: 7/15 passed and 8/15 failed.
+
+Final Windows result recorded 2026-06-25:
+
+| Result | Count |
+|---|---:|
+| Total cases | 15 |
+| Passed | 15 |
+| Failed | 0 |
+| P0 passed | 14 / 14 |
+
+All 15 cases pass after porting and reviewing the Mac fixes against the Windows suite.
+
+Implemented evidence:
+
+- Chinese unclear-drug turns route to pharmacy risk without guessing a drug.
+- Generic dosage/take-this questions require parent confirmation.
+- API-key, password, secret, token, and raw payment-number patterns are blocked.
+- Read-tool trajectories are emitted as structured `planned` entries for `memory_search` and `check_drug_interaction`.
+- Save-memory and family-notification tool visibility appears only after card confirmation.
+- Translation, privacy, confirmation replay, and half-duplex fallback cases remain green.
+
+The suite is deterministic and fixture-backed. A `planned` read-tool trace proves routing and observability, not a credential-backed MCP round trip. Real MCP/provider execution must be described separately and must not be inferred from this eval result.
+
+The latest machine-readable result is stored in `evals/baseline_report.json`. The historical 7/15 baseline is retained above; the suite reached 15/15 through product and observability fixes, not by weakening expected safety behaviour.

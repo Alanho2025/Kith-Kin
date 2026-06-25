@@ -1,8 +1,60 @@
 # Gemini Live Input Transcription Validation
 
-Version: 0.2.0
-Recorded: 2026-06-22
-Status: `fail` for the real provider checkpoint (`translation_latency_exceeded`)
+Version: 0.3.0
+Recorded: 2026-06-25
+Status: deterministic finalisation fix passes; credential-backed rerun pending. The historical real-provider translation latency checkpoint remains `fail`.
+
+## 2026-06-25 Turn Finalisation Fix
+
+The Live adapter no longer relies on `input_transcription.finished` as the only
+way to close a spoken turn. It now:
+
+- configures Gemini automatic activity detection with an 800 ms silence window;
+- accumulates provider partial transcripts under one utterance ID; and
+- emits one normalised `transcript.final` when
+  `server_content.turn_complete` closes the turn.
+
+The provider-shaped integration test proves this full downstream path:
+
+```text
+input_transcription partials
+  -> server_content.turn_complete
+  -> transcript.final
+  -> translation.final
+  -> route.decision
+  -> cards.render
+```
+
+Recorded local verification:
+
+```text
+Focused Live adapter/runtime tests: 13 passed
+Full backend suite: 163 passed
+Agent eval suite: 15/15 passed
+Ruff: pass
+MyPy: pass
+```
+
+No `GOOGLE_API_KEY` or `GEMINI_API_KEY` was available in this Windows
+environment, so this update does not claim a fresh real-provider pass. The next
+credential-backed smoke test must replay actual 16 kHz PCM and confirm that a
+natural silence produces the same final event and downstream card path.
+
+References:
+
+- [Gemini Live API capabilities](https://ai.google.dev/gemini-api/docs/live-api/capabilities)
+- [Gemini Live WebSocket API reference](https://ai.google.dev/api/live)
+
+## 2026-06-24 Dev Agent Update
+
+The application defaults now use the council-approved Gemini 2.5 models:
+
+- Live audio session: `gemini-2.5-flash-native-audio-preview-12-2025`
+- Faithful text sidecar: `gemini-2.5-flash`
+
+The backend now opens the Google GenAI SDK Live connection, enables input/output audio transcription, forwards 16 kHz PCM input, normalises transcription/audio/tool-call messages, and bridges provider audio back through the existing FastAPI WebSocket. The text sidecar uses deterministic prompting and low thinking, and runs only for English turns; Mandarin parent turns remain on the original transcript path. Contract and integration tests pass without credentials.
+
+This does not replace the historical provider measurements below. A new credential-backed latency capture is still required before the real checkpoint status can change from `fail`.
 
 ## Decision
 

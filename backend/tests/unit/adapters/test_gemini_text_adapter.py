@@ -1,4 +1,5 @@
 import pytest
+from google.genai import types
 
 from app.adapters.gemini_text_adapter import GeminiTextAdapter
 from app.adapters.provider_schemas import TranslationRequest
@@ -33,3 +34,53 @@ async def test_advice_contamination_is_rejected() -> None:
 
     with pytest.raises(ProviderUnavailableError):
         await adapter.translate_final(REQUEST)
+
+
+class FakeModels:
+    def __init__(self) -> None:
+        self.model: str | None = None
+        self.contents: str | None = None
+        self.config: types.GenerateContentConfig | None = None
+
+    async def generate_content(
+        self,
+        *,
+        model: str,
+        contents: str,
+        config: types.GenerateContentConfig,
+    ) -> object:
+        self.model = model
+        self.contents = contents
+        self.config = config
+        return type("Response", (), {"text": "你最近有服用任何新药吗？"})()
+
+
+class FakeAsyncClient:
+    def __init__(self, models: FakeModels) -> None:
+        self.models = models
+
+    async def aclose(self) -> None:
+        return None
+
+
+class FakeGenAiClient:
+    def __init__(self, models: FakeModels) -> None:
+        self.aio = FakeAsyncClient(models)
+
+
+async def test_sdk_translation_uses_25_flash_with_low_thinking() -> None:
+    models = FakeModels()
+    client = FakeGenAiClient(models)
+    settings = Settings(environment="test", google_api_key="test-key")
+    adapter = GeminiTextAdapter(settings, client_factory=lambda _: client)
+
+    result = await adapter.translate_final(REQUEST)
+
+    assert result.translated_text == "你最近有服用任何新药吗？"
+    assert models.model == "gemini-2.5-flash"
+    assert models.contents is not None
+    assert REQUEST.text in models.contents
+    assert models.config is not None
+    assert models.config.temperature == 0
+    assert models.config.thinking_config is not None
+    assert models.config.thinking_config.thinking_level == types.ThinkingLevel.LOW

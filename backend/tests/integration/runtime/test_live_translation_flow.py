@@ -1,9 +1,17 @@
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from app.adapters.fake_live_adapter import FakeLiveAdapter
+from app.adapters.gemini_live_adapter import GeminiSdkLiveSession
 from app.adapters.provider_schemas import (
+    GeminiLiveGateway,
+    LiveSessionContext,
+    LiveSessionPort,
+    ProviderAudioEvent,
+    ProviderLiveEvent,
     ProviderLiveEventType,
     ProviderTranscriptEvent,
     TranslationRequest,
@@ -69,7 +77,12 @@ def runtime(
     )
 
 
-def provider_transcript(*, final: bool, utterance_id: str = "utt_1") -> ProviderTranscriptEvent:
+def provider_transcript(
+    *,
+    final: bool,
+    utterance_id: str = "utt_1",
+    language: Literal["en", "zh", "unknown"] = "en",
+) -> ProviderTranscriptEvent:
     return ProviderTranscriptEvent(
         event_type=(
             ProviderLiveEventType.TRANSCRIPT_FINAL
@@ -79,7 +92,7 @@ def provider_transcript(*, final: bool, utterance_id: str = "utt_1") -> Provider
         provider_event_id="provider_evt_1",
         utterance_id=utterance_id,
         speaker="pharmacist",
-        language="en",
+        language=language,
         text="Do you have any allergies to antibiotics?",
         revision=2 if final else 1,
     )
@@ -147,6 +160,18 @@ async def test_partial_with_orchestrator_never_runs_router_guardian() -> None:
     assert [event["event_type"] for event in events] == ["transcript.partial"]
 
 
+async def test_chinese_final_skips_english_translation_sidecar() -> None:
+    gateway = CapturingTranslationGateway()
+
+    events = await runtime(gateway).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=True, language="zh"),
+    )
+
+    assert gateway.requests == []
+    assert [event["event_type"] for event in events] == ["transcript.final"]
+
+
 async def test_duplicate_final_is_idempotent() -> None:
     gateway = CapturingTranslationGateway()
     service = runtime(gateway)
@@ -179,3 +204,169 @@ async def test_disconnect_cancels_all_owned_tasks() -> None:
     await supervisor.cancel_all()
 
     assert supervisor.pending_count == 0
+
+
+class CoordinatedLiveSession(LiveSessionPort):
+    def __init__(self) -> None:
+        self.audio_frames: list[bytes] = []
+        self.closed = False
+        self.audio_received = asyncio.Event()
+        self.audio_delivered = asyncio.Event()
+
+    async def send_audio(self, frame: bytes) -> None:
+        self.audio_frames.append(frame)
+        self.audio_received.set()
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def _events(self) -> AsyncIterator[ProviderLiveEvent]:
+        await self.audio_received.wait()
+        yield ProviderAudioEvent(
+            event_type=ProviderLiveEventType.AUDIO,
+            provider_event_id="provider_audio_1",
+            audio=b"\x10\x20",
+        )
+        await asyncio.Event().wait()
+
+    def events(self) -> AsyncIterator[ProviderLiveEvent]:
+        return self._events()
+
+
+class CapturingLiveGateway(GeminiLiveGateway):
+    def __init__(self, session: CoordinatedLiveSession) -> None:
+        self.session = session
+        self.contexts: list[LiveSessionContext] = []
+
+    async def open_session(self, context: LiveSessionContext) -> LiveSessionPort:
+        self.contexts.append(context)
+        return self.session
+
+
+class CoordinatedWebSocket:
+    def __init__(self, live_session: CoordinatedLiveSession) -> None:
+        self.live_session = live_session
+        self.receives = 0
+        self.sent_json: list[dict[str, object]] = []
+        self.sent_bytes: list[bytes] = []
+
+    async def send_json(self, event: dict[str, object]) -> None:
+        self.sent_json.append(event)
+
+    async def send_bytes(self, frame: bytes) -> None:
+        self.sent_bytes.append(frame)
+        self.live_session.audio_delivered.set()
+
+    async def receive(self) -> dict[str, object]:
+        self.receives += 1
+        if self.receives == 1:
+            return {"type": "websocket.receive", "bytes": b"\x01\x02"}
+        await self.live_session.audio_delivered.wait()
+        return {"type": "websocket.disconnect"}
+
+    async def close(self, *, code: int, reason: str) -> None:
+        return None
+
+
+async def test_real_runtime_opens_one_session_and_bridges_audio() -> None:
+    live_session = CoordinatedLiveSession()
+    gateway = CapturingLiveGateway(live_session)
+    websocket = CoordinatedWebSocket(live_session)
+    cards = CardService(lambda: NOW)
+    service = LiveRuntimeService(
+        cards,
+        FakeLiveAdapter(),
+        lambda: NOW,
+        live_gateway=gateway,
+        user_id=USER_ID,
+    )
+
+    await service.serve(websocket, SESSION_ID, last_seen_sequence=None)  # type: ignore[arg-type]
+
+    assert len(gateway.contexts) == 1
+    assert gateway.contexts[0].session_id == SESSION_ID
+    assert gateway.contexts[0].user_id == USER_ID
+    assert live_session.audio_frames == [b"\x01\x02"]
+    assert websocket.sent_bytes == [b"\x10\x20"]
+    assert live_session.closed is True
+
+
+class ProviderMessageSession:
+    def __init__(self, messages: tuple[object, ...]) -> None:
+        self.messages = messages
+
+    async def send_realtime_input(self, **kwargs: object) -> None:
+        return None
+
+    async def receive(self) -> AsyncIterator[object]:
+        for message in self.messages:
+            yield message
+
+
+class NoopConnection:
+    async def __aenter__(self) -> ProviderMessageSession:
+        raise AssertionError("already entered")
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> None:
+        return None
+
+
+class NoopAsyncClient:
+    async def aclose(self) -> None:
+        return None
+
+
+class NoopClient:
+    def __init__(self) -> None:
+        self.aio = NoopAsyncClient()
+
+
+async def test_provider_partials_then_turn_complete_trigger_translation_route_and_cards() -> None:
+    from google.genai import types
+
+    messages = (
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                input_transcription=types.Transcription(
+                    text="Do you have any allergy",
+                    finished=False,
+                )
+            )
+        ),
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                input_transcription=types.Transcription(
+                    text="Do you have any allergy to antibiotics?",
+                    finished=False,
+                )
+            )
+        ),
+        types.LiveServerMessage(
+            server_content=types.LiveServerContent(turn_complete=True)
+        ),
+    )
+    provider_session = GeminiSdkLiveSession(
+        ProviderMessageSession(messages),  # type: ignore[arg-type]
+        NoopConnection(),  # type: ignore[arg-type]
+        NoopClient(),  # type: ignore[arg-type]
+    )
+    gateway = CapturingTranslationGateway()
+    service = runtime(gateway, with_turn_orchestrator=True)
+    emitted: list[dict[str, object]] = []
+
+    async for provider_event in provider_session.events():
+        emitted.extend(await service.handle_provider_event(SESSION_ID, provider_event))
+        if any(event["event_type"] == "cards.render" for event in emitted):
+            break
+    await provider_session.close()
+
+    event_types = [event["event_type"] for event in emitted]
+    assert "transcript.final" in event_types
+    assert "translation.final" in event_types
+    assert "route.decision" in event_types
+    assert "cards.render" in event_types

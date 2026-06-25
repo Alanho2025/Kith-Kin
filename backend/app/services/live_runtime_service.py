@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Callable
 from datetime import datetime
@@ -9,6 +10,10 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.adapters.fake_live_adapter import FakeLiveAdapter
 from app.adapters.provider_schemas import (
+    GeminiLiveGateway,
+    LiveSessionContext,
+    LiveSessionPort,
+    ProviderAudioEvent,
     ProviderErrorEvent,
     ProviderLiveEvent,
     ProviderLiveEventType,
@@ -20,6 +25,7 @@ from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import CardConfirmEvent, TranscriptFinalEvent, parse_runtime_event
 from app.services.card_service import CardService
 from app.services.runtime_command_service import RuntimeCommandService
+from app.services.task_supervisor import TaskSupervisor
 from app.services.translation_service import TranslationService
 from app.services.turn_orchestrator import TurnOrchestrator
 
@@ -35,6 +41,13 @@ TRANSLATION_UNAVAILABLE_EN = (
     "Translation is temporarily unavailable; "
     "the English transcript remains visible."
 )
+LIVE_SYSTEM_INSTRUCTION = """\
+You are Kith&Kin, a calm bilingual pharmacy communication companion.
+Listen carefully and respond briefly in Mandarin Chinese.
+Never diagnose, prescribe, change a dose, or tell the parent to start or stop medicine.
+Never disclose health, identity, payment, address, or family information automatically.
+When facts are uncertain, ask the pharmacist to confirm rather than guessing.
+"""
 
 
 class LiveRuntimeService:
@@ -49,6 +62,7 @@ class LiveRuntimeService:
         command_service: RuntimeCommandService | None = None,
         turn_orchestrator: TurnOrchestrator | None = None,
         user_id: UUID | None = None,
+        live_gateway: GeminiLiveGateway | None = None,
     ) -> None:
         self._cards = card_service
         self._fake_live = fake_live
@@ -57,6 +71,7 @@ class LiveRuntimeService:
         self._command_service = command_service
         self._turn_orchestrator = turn_orchestrator
         self._user_id = user_id
+        self._live_gateway = live_gateway
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
 
     async def serve(
@@ -95,6 +110,12 @@ class LiveRuntimeService:
         ]
         for event in events:
             await websocket.send_json(event)
+        if self._live_gateway is not None:
+            await self._serve_provider_runtime(websocket, session_id)
+            return
+        await self._serve_fake_runtime(websocket, session_id)
+
+    async def _serve_fake_runtime(self, websocket: WebSocket, session_id: UUID) -> None:
         try:
             while True:
                 message = await websocket.receive()
@@ -109,6 +130,85 @@ class LiveRuntimeService:
                     await self._handle_command(websocket, session_id, text)
         except WebSocketDisconnect:
             return
+
+    async def _serve_provider_runtime(self, websocket: WebSocket, session_id: UUID) -> None:
+        if self._live_gateway is None or self._user_id is None:
+            raise RuntimeError("LIVE_RUNTIME_NOT_CONFIGURED")
+        try:
+            live_session = await self._live_gateway.open_session(
+                LiveSessionContext(
+                    session_id=session_id,
+                    user_id=self._user_id,
+                    system_instruction=LIVE_SYSTEM_INSTRUCTION,
+                )
+            )
+        except Exception:
+            fallback = self._append_event(
+                session_id,
+                "fallback.show",
+                {
+                    "code": "LIVE_UNAVAILABLE",
+                    "message_zh": LIVE_UNAVAILABLE_ZH,
+                    "message_en": "Live speech is temporarily unavailable.",
+                    "retryable": True,
+                    "recovery_action": "reconnect",
+                    "related_event_id": None,
+                },
+            )
+            await websocket.send_json(fallback)
+            await websocket.close(code=1013, reason="LIVE_UNAVAILABLE")
+            return
+        supervisor = TaskSupervisor()
+        try:
+            client_task = supervisor.create(
+                self._forward_client_messages(websocket, session_id, live_session)
+            )
+            provider_task = supervisor.create(
+                self._forward_provider_events(websocket, session_id, live_session)
+            )
+            done, _ = await asyncio.wait(
+                {client_task, provider_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            await asyncio.gather(*done, return_exceptions=True)
+        finally:
+            await supervisor.cancel_all()
+            await live_session.close()
+
+    async def _forward_client_messages(
+        self,
+        websocket: WebSocket,
+        session_id: UUID,
+        live_session: LiveSessionPort,
+    ) -> None:
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
+                frame = message.get("bytes")
+                if isinstance(frame, bytes):
+                    await live_session.send_audio(frame)
+                    continue
+                text = message.get("text")
+                if isinstance(text, str):
+                    await self._handle_command(websocket, session_id, text)
+        except WebSocketDisconnect:
+            return
+
+    async def _forward_provider_events(
+        self,
+        websocket: WebSocket,
+        session_id: UUID,
+        live_session: LiveSessionPort,
+    ) -> None:
+        async for provider_event in live_session.events():
+            if isinstance(provider_event, ProviderAudioEvent):
+                await websocket.send_bytes(provider_event.audio)
+                continue
+            emitted = await self.handle_provider_event(session_id, provider_event)
+            for event in emitted:
+                await websocket.send_json(event)
 
     async def handle_provider_event(
         self,
@@ -218,6 +318,8 @@ class LiveRuntimeService:
         emitted = [transcript]
         if not is_final:
             return tuple(emitted)
+        if provider_event.language != "en":
+            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         if self._translation_service is None:
             return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         if self._translation_service.has_seen(provider_event.utterance_id):

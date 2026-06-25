@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     google_cloud_project: str = ""
     google_cloud_location: str = "global"
     gemini_api_version: str = "v1alpha"
-    gemini_live_model: str = "gemini-3.1-flash-live-preview"
-    gemini_text_model: str = "gemini-3.5-flash"
+    gemini_live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
+    gemini_text_model: str = "gemini-2.5-flash"
     gemini_live_translate_model: str = "gemini-3.5-live-translate-preview"
     live_translation_fallback_enabled: bool = False
 

@@ -19,6 +19,12 @@ PHARMACY_MARKERS = (
     "lisinopril",
     "ibuprofen",
     "dose",
+    "药片",
+    "药名",
+    "降血压药",
+    "用药",
+    "名字我不记得",
+    "名字我听不清",
 )
 PRIVACY_MARKERS = (
     "credit card",
@@ -26,6 +32,10 @@ PRIVACY_MARKERS = (
     "medicare",
     "home address",
     "cvv",
+    "api key",
+    "password",
+    "secret",
+    "token",
     "ignore previous",
     "system prompt",
     "developer message",

@@ -15,7 +15,7 @@ from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 
 from app.adapters.mcp_tool_adapter import McpToolAdapter
-from app.schemas.agent_outputs import CardSetProposal, RouteDecision
+from app.schemas.agent_outputs import CardSetProposal, RouteDecision, RouteType, ToolCallTrace
 from app.schemas.runtime_events import TranscriptFinalEvent
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,24 @@ class CompanionAgent(Agent):
         """Expose only read-only MCP tools plus proposal submission."""
         return (*McpToolAdapter.companion_tool_names(), "submit_response_cards")
 
+    @staticmethod
+    def plan_tool_calls(
+        event: TranscriptFinalEvent,
+        route: RouteDecision,
+    ) -> tuple[ToolCallTrace, ...]:
+        """Plan only architecture-approved read tools for the current turn."""
+        if route.route_type is not RouteType.PHARMACY_RISK:
+            return ()
+        text = event.payload.text.lower()
+        calls: list[ToolCallTrace] = []
+        if _needs_memory_search(text):
+            calls.append(ToolCallTrace(tool_name="memory_search", access="read"))
+        if _has_concrete_drug(text):
+            if not calls:
+                calls.append(ToolCallTrace(tool_name="memory_search", access="read"))
+            calls.append(ToolCallTrace(tool_name="check_drug_interaction", access="read"))
+        return tuple(calls)
+
     async def propose_cards(
         self,
         event: TranscriptFinalEvent,
@@ -293,10 +311,10 @@ class CompanionAgent(Agent):
             
             text_lower = event.payload.text.lower()
             
-            if "listen to pro" in text_lower or "lisinopril" in text_lower:
+            if _has_fuzzy_drug(text_lower) or "lisinopril" in text_lower:
                 mock_card = ResponseCard(
                     card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_QUESTION,
+                    card_type=CardType.ASK_TO_WRITE_DOWN,
                     zh_text="请药剂师写下药品名",
                     en_text="Ask pharmacist to write down the drug name",
                     risk_level=CardRiskLevel.NORMAL,
@@ -404,3 +422,50 @@ class CompanionAgent(Agent):
 
         proposal = CardSetProposal.model_validate(proposal_dict)
         return proposal
+
+
+def _has_fuzzy_drug(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "sounds like",
+            "maybe",
+            "not sure",
+            "listen to pro",
+            "名字我不记得",
+            "名字我听不清",
+            "药名不记得",
+            "药名听不清",
+        )
+    )
+
+
+def _needs_memory_search(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "allergy",
+            "allergies",
+            "current medication",
+            "current medicines",
+            "warfarin",
+            "last time",
+            "next pharmacy visit",
+            "recall",
+            "unresolved",
+        )
+    )
+
+
+def _has_concrete_drug(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "ibuprofen",
+            "nurofen",
+            "warfarin",
+            "lisinopril",
+            "perindopril",
+            "atorvastatin",
+        )
+    )

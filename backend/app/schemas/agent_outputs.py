@@ -2,7 +2,7 @@
 
 import json
 from enum import StrEnum
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -73,6 +73,16 @@ class CardSetProposal(BaseModel):
 
     card_set: CardSet
     proposal_hash: Annotated[str, Field(min_length=8, max_length=128)]
+
+
+class ToolCallTrace(BaseModel):
+    """Redacted observable tool trajectory entry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tool_name: Annotated[str, Field(min_length=1, max_length=80)]
+    access: Literal["read", "write", "external"]
+    phase: Literal["planned"] = "planned"
 
 
 TModel = TypeVar("TModel", bound=BaseModel)

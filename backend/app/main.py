@@ -184,6 +184,11 @@ def create_app(
         runtime_command_service,
         turn_orchestrator,
         user_id,
+        live_gateway=(
+            None
+            if resolved_settings.environment == "test"
+            else gemini_live_adapter
+        ),
     )
     app.state.live_runtime_service = live_runtime_service
     app.state.visit_completion_service = completion_service

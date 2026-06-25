@@ -19,6 +19,8 @@ def test_accepts_safe_development_configuration() -> None:
     assert settings.app_ws_token_ttl_seconds == 60
     assert settings.rag_max_records == 5
     assert settings.rag_max_context_chars == 4000
+    assert settings.gemini_live_model == "gemini-2.5-flash-native-audio-preview-12-2025"
+    assert settings.gemini_text_model == "gemini-2.5-flash"
 
 
 def test_production_requires_ticket_secret() -> None:

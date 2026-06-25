@@ -4,9 +4,11 @@ from uuid import UUID
 
 from app.agents.companion_agent import CompanionAgent
 from app.agents.guardian_agent import GuardianAgent
+from app.agents.router_agent import RouterAgent
 from app.core.constants import GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
+from app.schemas.cards import CardType
 from app.schemas.runtime_events import TranscriptFinalEvent
 from app.services.card_service import CardService
 from app.services.turn_orchestrator import TurnOrchestrator
@@ -114,3 +116,44 @@ async def test_guardian_block_skips_companion_cards() -> None:
 
     assert outcome.guardian.decision is GuardianDecisionType.BLOCK
     assert outcome.card_proposal is None
+
+
+async def test_pharmacy_turn_exposes_read_tool_trajectory() -> None:
+    orchestrator = TurnOrchestrator(
+        RouterAgent(),
+        GuardianAgent(),
+        CompanionAgent(lambda: NOW),
+        CardService(lambda: NOW),
+    )
+
+    outcome = await orchestrator.process_final_turn(
+        final_event(
+            "This new medication is ibuprofen. "
+            "Please check it against the patient's warfarin."
+        ),
+        context(),
+    )
+
+    assert [call.tool_name for call in outcome.tool_calls] == [
+        "memory_search",
+        "check_drug_interaction",
+    ]
+    assert all(call.access == "read" for call in outcome.tool_calls)
+    assert all(call.phase == "planned" for call in outcome.tool_calls)
+
+
+async def test_chinese_unknown_drug_proposes_write_down_card() -> None:
+    orchestrator = TurnOrchestrator(
+        RouterAgent(),
+        GuardianAgent(),
+        CompanionAgent(lambda: NOW),
+        CardService(lambda: NOW),
+    )
+
+    outcome = await orchestrator.process_final_turn(
+        final_event("我想买那个白色的小药片，名字我不记得了。"),
+        context(),
+    )
+
+    assert outcome.card_proposal is not None
+    assert outcome.card_proposal.card_set.cards[0].card_type is CardType.ASK_TO_WRITE_DOWN

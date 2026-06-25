@@ -21,7 +21,13 @@ from app.agents.companion_agent import (
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.core.constants import GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
-from app.schemas.agent_outputs import CardSetProposal, GuardianDecision, RouteDecision, RouteType
+from app.schemas.agent_outputs import (
+    CardSetProposal,
+    GuardianDecision,
+    RouteDecision,
+    RouteType,
+    ToolCallTrace,
+)
 from app.schemas.cards import CardSet
 from app.schemas.runtime_events import TranscriptFinalEvent
 from app.services.card_service import CardService
@@ -40,6 +46,12 @@ class GuardianPort(Protocol):
 
 
 class CompanionPort(Protocol):
+    def plan_tool_calls(
+        self,
+        event: TranscriptFinalEvent,
+        route: RouteDecision,
+    ) -> tuple[ToolCallTrace, ...]: ...
+
     async def propose_cards(
         self,
         event: TranscriptFinalEvent,
@@ -56,6 +68,7 @@ class TurnOutcome:
     guardian: GuardianDecision
     card_proposal: CardSetProposal | None
     card_review: GuardianDecision | None
+    tool_calls: tuple[ToolCallTrace, ...]
 
 
 class TurnOrchestrator:
@@ -115,11 +128,12 @@ class TurnOrchestrator:
             route = router_task.result()
             guardian = guardian_task.result()
             if guardian.decision is GuardianDecisionType.BLOCK:
-                return TurnOutcome(route, guardian, None, None)
+                return TurnOutcome(route, guardian, None, None, ())
             _NO_COMPANION_ROUTES = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
             if route.route_type in _NO_COMPANION_ROUTES:
-                return TurnOutcome(route, guardian, None, None)
+                return TurnOutcome(route, guardian, None, None, ())
 
+            legacy_tool_calls = self._companion.plan_tool_calls(event, route)
             proposal = await self._companion.propose_cards(
                 event,
                 route,
@@ -128,7 +142,7 @@ class TurnOrchestrator:
             card_review = await self._guardian.review_cards(proposal.card_set)
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)
-            return TurnOutcome(route, guardian, proposal, card_review)
+            return TurnOutcome(route, guardian, proposal, card_review, legacy_tool_calls)
 
         # 1. Instantiate the ADK session and runner
         session_service = InMemorySessionService()  # type: ignore[no-untyped-call]
@@ -256,11 +270,13 @@ class TurnOrchestrator:
         _NO_COMPANION_ROUTES = {RouteType.PASSIVE_TRANSLATION, RouteType.PRIVACY_RISK}
         proposal = None
         card_review = None
+        tool_calls: tuple[ToolCallTrace, ...] = ()
 
         if (
             guardian.decision is not GuardianDecisionType.BLOCK
             and route.route_type not in _NO_COMPANION_ROUTES
         ):
+            tool_calls = self._companion.plan_tool_calls(event, route)
             if not proposal_data:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)
@@ -273,4 +289,4 @@ class TurnOrchestrator:
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)
 
-        return TurnOutcome(route, guardian, proposal, card_review)
+        return TurnOutcome(route, guardian, proposal, card_review, tool_calls)

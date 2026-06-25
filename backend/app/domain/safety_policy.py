@@ -1,5 +1,6 @@
 """Pure consent policy for sensitive data and outward actions."""
 
+import re
 from enum import StrEnum
 
 
@@ -82,17 +83,32 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.PAYMENT_REQUEST,
         )
-    if any(marker in lowered for marker in (
-        "passport",
-        "medicare",
-        "driver licence",
-        "driver's licence",
-        "drivers licence",
-        "driver license",
-        "driver's license",
-        "drivers license",
-        "driving licence",
-    )):
+    if re.search(r"\b(?:\d[ -]*?){13,19}\b", lowered):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.PAYMENT_REQUEST,
+        )
+    if any(marker in lowered for marker in ("api key", "password", "secret", "token")):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.IDENTITY_REQUEST,
+        )
+    if any(
+        marker in lowered
+        for marker in (
+            "passport",
+            "medicare",
+            "driver licence",
+            "driver's licence",
+            "drivers licence",
+            "driver license",
+            "driver's license",
+            "drivers license",
+            "driving licence",
+        )
+    ):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
@@ -119,6 +135,10 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
         "dose",
         "prescription",
         "refill",
+        "what dose",
+        "should i take",
+        "can i take this",
+        "take this for my",
     )
     if any(marker in lowered for marker in medical_confirmation_markers):
         return (
