@@ -16,8 +16,7 @@ from app.schemas.mcp import DrugInteractionRisk
 from app.services.rag_service import RagService
 
 ROOT = Path(__file__).resolve().parents[4]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT))
 
 from scripts.seed_demo_data import DEMO_SESSION_ID, DEMO_USER_ID, seed  # noqa: E402
 
