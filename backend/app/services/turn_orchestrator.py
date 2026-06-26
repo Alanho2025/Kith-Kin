@@ -231,9 +231,12 @@ class TurnOrchestrator:
         session = await session_service.get_session(
             app_name="agents", user_id=user_id, session_id=session_id
         )
-        assert session is not None
-        session.state["route_decision"] = route.model_dump()
-        session.state["guardian_decision"] = guardian.model_dump()
+        if session is None:
+            session = await session_service.create_session(
+                app_name="agents", user_id=user_id, session_id=session_id
+            )
+        session.state["route_decision"] = route.model_dump(mode="json")
+        session.state["guardian_decision"] = guardian.model_dump(mode="json")
 
         runner = Runner(
             app_name="agents",

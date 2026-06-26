@@ -37,6 +37,7 @@ class GeminiTextAdapter(TranslationGateway):
                 raise ProviderUnavailableError("TRANSLATION_UNAVAILABLE")
             try:
                 from google import genai
+                from google.genai import types
                 client = genai.Client(api_key=key_val)
                 model_name = self._settings.gemini_text_model or "gemini-2.5-flash"
                 prompt = (
@@ -49,6 +50,9 @@ class GeminiTextAdapter(TranslationGateway):
                 response = await client.aio.models.generate_content(
                     model=model_name,
                     contents=prompt,
+                    config=types.GenerateContentConfig(
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    ),
                 )
                 translated = response.text.strip() if response.text else ""
             except Exception as e:

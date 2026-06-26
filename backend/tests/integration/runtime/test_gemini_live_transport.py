@@ -160,8 +160,13 @@ async def test_agent_failure_does_not_close_live_audio_transport(
             }
         )
 
+        # Translation events now survive an agent failure (decoupled tracks), so
+        # scan for the COMPANION_UNAVAILABLE fallback rather than the first one.
         fallback = socket.receive_json()
-        while fallback["event_type"] != "fallback.show":
+        while not (
+            fallback["event_type"] == "fallback.show"
+            and fallback["payload"]["code"] == "COMPANION_UNAVAILABLE"
+        ):
             fallback = socket.receive_json()
         assert fallback["payload"]["code"] == "COMPANION_UNAVAILABLE"
 
