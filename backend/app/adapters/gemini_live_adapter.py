@@ -97,6 +97,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
             while not self._closed:
                 async for msg in self._session.receive():
                     await self._process_message(msg)
+                await self._flush_current_transcript_final()
                 await asyncio.sleep(0.01)
         except asyncio.CancelledError:
             pass
@@ -172,6 +173,24 @@ class GeminiLiveSessionPort(LiveSessionPort):
                             }
                             audio_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                             await self._queue.put(audio_event)
+
+    async def _flush_current_transcript_final(self) -> None:
+        if not self._current_transcript_text:
+            return
+        flat_msg = {
+            "type": "input_transcription",
+            "event_id": f"evt_{uuid4()}",
+            "utterance_id": self._current_utterance_id,
+            "speaker": "pharmacist",
+            "language": "en",
+            "text": self._current_transcript_text,
+            "revision": self._revision,
+            "final": True,
+        }
+        await self._queue.put(GeminiLiveAdapter.map_provider_message(flat_msg))
+        self._current_utterance_id = f"utt_{uuid4()}"
+        self._current_transcript_text = ""
+        self._revision = 1
 
 
 class GeminiLiveAdapter(GeminiLiveGateway):

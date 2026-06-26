@@ -158,13 +158,49 @@ async def test_live_session_accumulates_incremental_input_transcription() -> Non
         port = await adapter.open_session(context)
         iterator = port.events()
         partial = await anext(iterator)
-        final = await anext(iterator)
+        final = await asyncio.wait_for(anext(iterator), timeout=0.5)
 
         assert isinstance(partial, ProviderTranscriptEvent)
         assert partial.text == "Do you"
         assert isinstance(final, ProviderTranscriptEvent)
         assert final.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
         assert final.text == "Do you have any allergies?"
+
+        await port.close()
+
+
+@pytest.mark.anyio
+async def test_live_session_finalizes_partial_transcript_when_receive_turn_ends() -> None:
+    settings = Settings(google_api_key="dummy_key")
+    adapter = GeminiLiveAdapter(settings)
+    context = LiveSessionContext(
+        session_id=Path(__file__).name,
+        user_id=Path(__file__).name,
+        system_instruction="Test instruction",
+    )
+
+    mock_session = AsyncMock()
+    mock_session.receive = MagicMock(return_value=_single_partial_transcript())
+    mock_connect_cm = AsyncMock()
+    mock_connect_cm.__aenter__.return_value = mock_session
+    mock_connect_cm.__aexit__.return_value = None
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.aio.live.connect.return_value = mock_connect_cm
+        mock_client_cls.return_value = mock_client
+
+        port = await adapter.open_session(context)
+        iterator = port.events()
+        partial = await anext(iterator)
+        final = await asyncio.wait_for(anext(iterator), timeout=0.5)
+
+        assert isinstance(partial, ProviderTranscriptEvent)
+        assert partial.event_type == ProviderLiveEventType.TRANSCRIPT_PARTIAL
+        assert partial.text == "Please confirm my"
+        assert isinstance(final, ProviderTranscriptEvent)
+        assert final.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
+        assert final.text == "Please confirm my"
 
         await port.close()
 
@@ -204,3 +240,11 @@ async def test_live_session_ignores_output_transcription_for_visual_track() -> N
             await asyncio.wait_for(anext(port.events()), timeout=0.05)
 
         await port.close()
+
+
+async def _single_partial_transcript():
+    yield types.LiveServerMessage(
+        server_content=types.LiveServerContent(
+            input_transcription=types.Transcription(text="Please confirm my", finished=False)
+        )
+    )
