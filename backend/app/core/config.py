@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     google_cloud_location: str = "global"
     gemini_api_version: str = "v1alpha"
     gemini_live_model: str = "gemini-3.1-flash-live-preview"
-    gemini_text_model: str = "gemini-3.5-flash"
+    gemini_text_model: str = "gemini-2.5-flash"
     gemini_live_translate_model: str = "gemini-3.5-live-translate-preview"
     live_translation_fallback_enabled: bool = False
 
@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     rag_max_records: int = 5
     rag_max_context_chars: int = 4000
     rag_timeout_ms: int = 1500
+    translation_timeout_ms: int = 4000
     drug_check_timeout_ms: int = 2500
     memory_write_timeout_ms: int = 3000
     notification_timeout_ms: int = 5000

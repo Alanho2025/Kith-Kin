@@ -88,7 +88,7 @@ def create_app(
     )
     translation_service = TranslationService(
         translation_gateway,
-        timeout_ms=resolved_settings.rag_timeout_ms,
+        timeout_ms=resolved_settings.translation_timeout_ms,
     )
     session_service = SessionService(session_store, clock, visit_repository)
     issuer = AppWebSocketTicketIssuer(resolved_settings, clock)

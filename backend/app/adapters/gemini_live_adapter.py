@@ -35,7 +35,9 @@ class GeminiLiveSessionPort(LiveSessionPort):
         self._current_utterance_id = f"utt_{uuid4()}"
         self._current_transcript_text = ""
         self._revision = 1
+        self._last_partial_at: float | None = None
         self._read_task = asyncio.create_task(self._read_loop())
+        self._idle_flush_task = asyncio.create_task(self._idle_flush_loop())
 
     async def send_audio(self, frame: bytes) -> None:
         if self._closed:
@@ -84,11 +86,45 @@ class GeminiLiveSessionPort(LiveSessionPort):
             return
         self._closed = True
         self._read_task.cancel()
+        self._idle_flush_task.cancel()
         try:
             await self._ctx.__aexit__(None, None, None)
         except Exception:
             pass
         await self._queue.put(None)
+
+    async def _idle_flush_loop(self) -> None:
+        """Emit a TRANSCRIPT_FINAL when partials stop arriving (the live-translate
+        model streams partials but never sets `finished`, so silence must finalize)."""
+        idle_seconds = 1.5
+        try:
+            while not self._closed:
+                await asyncio.sleep(0.2)
+                if not self._current_transcript_text or self._last_partial_at is None:
+                    continue
+                if asyncio.get_event_loop().time() - self._last_partial_at >= idle_seconds:
+                    await self._flush_current_transcript_final()
+        except asyncio.CancelledError:
+            pass
+
+    async def _flush_current_transcript_final(self) -> None:
+        if not self._current_transcript_text:
+            return
+        flat_msg = {
+            "type": "input_transcription",
+            "event_id": f"evt_{uuid4()}",
+            "utterance_id": self._current_utterance_id,
+            "speaker": "pharmacist",
+            "language": "en",
+            "text": self._current_transcript_text,
+            "revision": self._revision,
+            "final": True,
+        }
+        await self._queue.put(GeminiLiveAdapter.map_provider_message(flat_msg))
+        self._current_utterance_id = f"utt_{uuid4()}"
+        self._current_transcript_text = ""
+        self._revision = 1
+        self._last_partial_at = None
 
     async def _read_loop(self) -> None:
         try:
@@ -154,8 +190,10 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     self._current_utterance_id = f"utt_{uuid4()}"
                     self._current_transcript_text = ""
                     self._revision = 1
+                    self._last_partial_at = None
                 else:
                     self._revision += 1
+                    self._last_partial_at = asyncio.get_event_loop().time()
 
             # Chinese generated audio
             if content.model_turn and content.model_turn.parts:
@@ -198,8 +236,15 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             # Configure LiveConnectConfig
             config = types.LiveConnectConfig(
                 response_modalities=["AUDIO"],
+                system_instruction=context.system_instruction,
                 input_audio_transcription=types.AudioTranscriptionConfig(),
                 output_audio_transcription=types.AudioTranscriptionConfig(),
+                realtime_input_config=types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(
+                        disabled=False,
+                        silence_duration_ms=800,
+                    )
+                ),
             )
             
             # Connect using gemini-3.5-live-translate-preview
