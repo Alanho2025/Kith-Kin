@@ -333,10 +333,36 @@ class LiveRuntimeService:
         if self._turn_orchestrator is None or self._user_id is None:
             return emitted
         event = TranscriptFinalEvent.model_validate(transcript)
-        outcome = await self._turn_orchestrator.process_final_turn(
-            event,
-            TrustedRequestContext(session_id=session_id, user_id=self._user_id, origin="runtime"),
-        )
+        try:
+            outcome = await self._turn_orchestrator.process_final_turn(
+                event,
+                TrustedRequestContext(
+                    session_id=session_id, user_id=self._user_id, origin="runtime"
+                ),
+            )
+        except Exception:
+            # Agent/card track is best-effort: never let it discard the
+            # already-produced transcript + translation events. Still surface a
+            # COMPANION_UNAVAILABLE fallback so the UI knows cards degraded.
+            logger.warning("Turn orchestrator failed; preserving translation", exc_info=True)
+            emitted.append(
+                self._append_event(
+                    session_id,
+                    "fallback.show",
+                    {
+                        "code": "COMPANION_UNAVAILABLE",
+                        "message_zh": "暂时无法生成回应卡片，翻译仍在继续。",
+                        "message_en": (
+                            "Response cards are temporarily unavailable; "
+                            "translation continues."
+                        ),
+                        "retryable": True,
+                        "recovery_action": "return_to_listening",
+                        "related_event_id": None,
+                    },
+                )
+            )
+            return emitted
         emitted.append(
             self._append_event(
                 session_id,

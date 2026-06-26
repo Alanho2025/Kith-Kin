@@ -41,7 +41,7 @@ def make_memory_search(adapter: McpToolAdapter) -> Callable[..., Any]:
             A dictionary containing the query result list of memory records.
         """
         res = await adapter.memory_search(query, tuple(tags))
-        return res.model_dump()
+        return res.model_dump(mode="json")
     return memory_search
 
 
@@ -65,7 +65,7 @@ def make_check_drug_interaction(adapter: McpToolAdapter) -> Callable[..., Any]:
             A dictionary containing the interaction risk level and details.
         """
         res = await adapter.check_drug_interaction(new_drug, tuple(current_meds))
-        return res.model_dump()
+        return res.model_dump(mode="json")
     return check_drug_interaction
 
 
@@ -86,7 +86,7 @@ def make_submit_response_cards() -> Callable[..., Any]:
         Returns:
             A status dictionary indicating submission success.
         """
-        tool_context.state["companion_proposal"] = proposal.model_dump()
+        tool_context.state["companion_proposal"] = proposal.model_dump(mode="json")
         return {"status": "success", "message": "Cards proposed successfully."}
     return submit_response_cards
 
@@ -419,7 +419,7 @@ class CompanionAgent(Agent):
                     app_name="agents", user_id=user_id, session_id=session_id
                 )
             real_session = session_service.sessions["agents"][user_id][session_id]
-            real_session.state["companion_proposal"] = proposal.model_dump()
+            real_session.state["companion_proposal"] = proposal.model_dump(mode="json")
 
         # 6. Retrieve state
         session = await session_service.get_session(
