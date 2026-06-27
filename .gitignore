@@ -53,8 +53,14 @@ tmp/
 
 # Local database/runtime state
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 *.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # IDE / OS
 .DS_Store
