@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -251,10 +252,12 @@ class TurnOrchestrator:
         )
 
         # Bind tools
+        submit_clock = self._clock or (lambda: datetime.now(timezone.utc))
+
         tools = [
             make_memory_search(mcp_adapter),
             make_check_drug_interaction(mcp_adapter),
-            make_submit_response_cards(),
+            make_submit_response_cards(clock = submit_clock),
         ]
 
         # Use the companion ADK agent instance and clone it with bound tools/prompts
