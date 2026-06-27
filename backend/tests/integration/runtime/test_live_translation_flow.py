@@ -9,13 +9,18 @@ from app.adapters.provider_schemas import (
     TranslationRequest,
     TranslationSegment,
 )
+from app.agents.companion_agent import CompanionAgent
+from app.agents.guardian_agent import GuardianAgent
+from app.agents.router_agent import RouterAgent
 from app.services.card_service import CardService
 from app.services.live_runtime_service import LiveRuntimeService
 from app.services.task_supervisor import TaskSupervisor
 from app.services.translation_service import TranslationService
+from app.services.turn_orchestrator import TurnOrchestrator
 
 NOW = datetime(2026, 6, 22, tzinfo=UTC)
 SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
+USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 
 class CapturingTranslationGateway:
@@ -37,12 +42,30 @@ class CapturingTranslationGateway:
         )
 
 
-def runtime(gateway: CapturingTranslationGateway, *, timeout_ms: int = 1000) -> LiveRuntimeService:
+def runtime(
+    gateway: CapturingTranslationGateway,
+    *,
+    timeout_ms: int = 1000,
+    with_turn_orchestrator: bool = False,
+) -> LiveRuntimeService:
+    cards = CardService(lambda: NOW)
+    turn_orchestrator = (
+        TurnOrchestrator(
+            RouterAgent(),
+            GuardianAgent(),
+            CompanionAgent(lambda: NOW),
+            cards,
+        )
+        if with_turn_orchestrator
+        else None
+    )
     return LiveRuntimeService(
-        CardService(),
+        cards,
         FakeLiveAdapter(),
         lambda: NOW,
         TranslationService(gateway, timeout_ms=timeout_ms),
+        turn_orchestrator=turn_orchestrator,
+        user_id=USER_ID if turn_orchestrator is not None else None,
     )
 
 
@@ -89,6 +112,39 @@ async def test_final_appends_one_faithful_segment() -> None:
     ]
     assert events[-1]["payload"]["append_only"] is True
     assert events[-1]["payload"]["mode"] == "faithful"
+
+
+async def test_successful_translation_runs_router_guardian_trace() -> None:
+    gateway = CapturingTranslationGateway()
+
+    events = await runtime(gateway, with_turn_orchestrator=True).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=True),
+    )
+
+    event_types = [event["event_type"] for event in events]
+    assert event_types[:3] == [
+        "transcript.final",
+        "translation.pending",
+        "translation.final",
+    ]
+    assert event_types.index("route.decision") > event_types.index("translation.final")
+    assert event_types[-1] == "cards.render"
+    route = next(event for event in events if event["event_type"] == "route.decision")
+    assert route["payload"]["route_type"] == "pharmacy_risk"
+    assert route["payload"]["reason_code"] == "pharmacy_term"
+
+
+async def test_partial_with_orchestrator_never_runs_router_guardian() -> None:
+    gateway = CapturingTranslationGateway()
+
+    events = await runtime(gateway, with_turn_orchestrator=True).handle_provider_event(
+        SESSION_ID,
+        provider_transcript(final=False),
+    )
+
+    assert gateway.requests == []
+    assert [event["event_type"] for event in events] == ["transcript.partial"]
 
 
 async def test_duplicate_final_is_idempotent() -> None:

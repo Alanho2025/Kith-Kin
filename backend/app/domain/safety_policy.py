@@ -76,7 +76,33 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.PROMPT_INJECTION,
         )
-    if any(marker in lowered for marker in ("credit card", "card number", "cvv")):
+    if any(marker in lowered for marker in ("api key", "password", "secret", "token")):
+        return (
+            SafetyBackstopResult.BLOCK,
+            BackstopRisk.PRIVACY,
+            BackstopReason.IDENTITY_REQUEST,
+        )
+    if any(marker in lowered for marker in (
+        "save the summary",
+        "save this",
+        "send this to my daughter",
+        "send this to my son",
+        "send this to my family",
+        "notify family",
+    )):
+        return (
+            SafetyBackstopResult.REQUIRE_CONFIRMATION,
+            BackstopRisk.MEDICAL,
+            BackstopReason.MEDICAL_ADVICE,
+        )
+    if any(marker in lowered for marker in (
+        "credit card",
+        "card number",
+        "cvv",
+        "bsb",
+        "bank account",
+        "account number",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
@@ -98,12 +124,24 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.IDENTITY_REQUEST,
         )
-    if any(marker in lowered for marker in ("home address", "where do you live", "street address")):
+    if any(marker in lowered for marker in (
+        "home address",
+        "where do you live",
+        "street address",
+        "residential address",
+        "your address",
+    )):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
             BackstopReason.ADDRESS_REQUEST,
         )
+    passive_medical_explanation_markers = (
+        "may make you sleepy",
+        "avoid driving",
+    )
+    if any(marker in lowered for marker in passive_medical_explanation_markers):
+        return SafetyBackstopResult.ALLOW, BackstopRisk.NORMAL, BackstopReason.NONE
     medical_confirmation_markers = (
         "stop taking",
         "change your dose",
@@ -113,10 +151,16 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
         "medicine",
         "medication",
         "drug",
+        "take this",
+        "headache",
         "allergy",
         "allergies",
         "antibiotic",
         "dose",
+        "prescription",
+        "refill",
+        "药",
+        "降血压",
     )
     if any(marker in lowered for marker in medical_confirmation_markers):
         return (

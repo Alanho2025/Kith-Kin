@@ -1,16 +1,28 @@
 from collections.abc import Callable
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from app.core.errors import SessionNotConnectableError
 from app.repositories.session_store import SessionRecord, SessionStore
+from app.repositories.visit_repository import VisitRepository
 
 
 class SessionService:
-    def __init__(self, store: SessionStore, clock: Callable[[], datetime]) -> None:
+    def __init__(
+        self,
+        store: SessionStore,
+        clock: Callable[[], datetime],
+        visit_repository: VisitRepository | None = None,
+    ) -> None:
         self._store = store
         self._clock = clock
+        self._visit_repository = visit_repository
+        self.prefetch_cache: dict[UUID, list[dict[str, Any]]] = {}
+        self._cleanup_callbacks: list[Callable[[UUID], None]] = []
+
+    def register_cleanup_callback(self, callback: Callable[[UUID], None]) -> None:
+        self._cleanup_callbacks.append(callback)
 
     async def create(
         self,
@@ -26,12 +38,18 @@ class SessionService:
             created_at=self._clock(),
         )
         await self._store.add(record)
+        if self._visit_repository is not None:
+            summaries = await self._visit_repository.recent_for_user(user_id, limit=5)
+            self.prefetch_cache[record.session_id] = [s.value for s in summaries]
         return record
 
     async def require_connectable(self, session_id: UUID, user_id: UUID) -> SessionRecord:
         record = await self._store.get(session_id)
         if record is None or record.status == "ended" or record.user_id != user_id:
             raise SessionNotConnectableError
+        if session_id not in self.prefetch_cache and self._visit_repository is not None:
+            summaries = await self._visit_repository.recent_for_user(user_id, limit=5)
+            self.prefetch_cache[session_id] = [s.value for s in summaries]
         return record
 
     async def end(self, session_id: UUID, user_id: UUID) -> SessionRecord:
@@ -39,4 +57,7 @@ class SessionService:
         ended = await self._store.mark_ended(session_id, self._clock())
         if ended is None:
             raise SessionNotConnectableError
+        self.prefetch_cache.pop(session_id, None)
+        for callback in self._cleanup_callbacks:
+            callback(session_id)
         return ended

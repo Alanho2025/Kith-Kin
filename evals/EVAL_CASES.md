@@ -1,5 +1,21 @@
 # Kith&Kin Evaluation Cases
 
+> Executable source of truth: `evals/cases.json`
+> Runner: `evals/run.py`
+> Current gate: exactly 15 cases; all P0 and all 15 total must pass before refactoring.
+
+## Machine-readable acceptance dimensions
+
+Each executable case maps the architecture to five explicit fields:
+
+1. `expected_route`
+2. `expected_guardian`
+3. `expected_tool_trajectory`
+4. `forbidden_behavior`
+5. `pass_criteria`
+
+The runner treats missing tool observability as a failure. A case is not green merely because the prose sounds safe.
+
 Version: 0.1
 Status: executable deterministic subset implemented; remaining catalogue cases planned
 Primary scenario: Elderly Chinese-speaking user visits an Australian pharmacy alone

@@ -9,7 +9,9 @@ from app.domain.confirmation import StoredConfirmation
 from .conftest import ORIGIN, create_session, issue_ticket
 
 
-def test_http_and_ws_share_idempotent_service(app_client: TestClient) -> None:
+def test_runtime_rejects_arbitrary_confirm_but_http_recovery_remains_legacy(
+    app_client: TestClient,
+) -> None:
     session_id = create_session(app_client)
     issue_ticket(app_client, session_id)
     confirmation_id = "confirmation-shared-1"
@@ -64,7 +66,11 @@ def test_http_and_ws_share_idempotent_service(app_client: TestClient) -> None:
         )
         confirmed = socket.receive_json()
         assert confirmed["event_type"] == "card.confirmed"
-        assert confirmed["payload"]["replayed"] is False
+        assert confirmed["payload"] == {
+            "confirmation_id": confirmation_id,
+            "action_type": "show_to_pharmacist",
+            "replayed": False,
+        }
 
     recovered = app_client.post(
         "/api/cards/confirm",
