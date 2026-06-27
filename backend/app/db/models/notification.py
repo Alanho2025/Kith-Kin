@@ -13,9 +13,7 @@ class Notification(Base):
     """Local-first notification stub result."""
 
     __tablename__ = "notifications"
-    __table_args__ = (
-        UniqueConstraint("idempotency_key", name="uq_notifications_idempotency_key"),
-    )
+    __table_args__ = (UniqueConstraint("idempotency_key", name="uq_notifications_idempotency_key"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))

@@ -33,11 +33,20 @@ logger = logging.getLogger(__name__)
 # than relying on the companion LLM to remember to call the tool. Safety backstop.
 INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
     {
-        "ibuprofen", "diclofenac", "naproxen", "aspirin",
+        "ibuprofen",
+        "diclofenac",
+        "naproxen",
+        "aspirin",
         "warfarin",
-        "lisinopril", "perindopril", "ramipril",
-        "candesartan", "telmisartan", "irbesartan",
-        "amlodipine", "atorvastatin", "rosuvastatin",
+        "lisinopril",
+        "perindopril",
+        "ramipril",
+        "candesartan",
+        "telmisartan",
+        "irbesartan",
+        "amlodipine",
+        "atorvastatin",
+        "rosuvastatin",
     }
 )
 
@@ -216,9 +225,7 @@ class TurnOrchestrator:
         if getattr(companion_any, "_session_service", None) is not None:
             try:
                 sid = UUID(str(event.session_id))
-                cached = getattr(
-                    companion_any._session_service, "prefetch_cache", {}
-                ).get(sid, [])
+                cached = getattr(companion_any._session_service, "prefetch_cache", {}).get(sid, [])
                 for val in cached:
                     advice = val.get("pharmacist_advice_summary", "")
                     unresolved = val.get("unresolved_questions", [])
@@ -238,8 +245,7 @@ class TurnOrchestrator:
             base_prompt, meds, allergies, prior_summary, conversation_context
         )
         print(
-            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, "
-            f"prior: {prior_summary}",
+            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, prior: {prior_summary}",
             flush=True,
         )
 
@@ -305,8 +311,7 @@ class TurnOrchestrator:
                 new_message=new_message,
             ):
                 print(
-                    f"[ADK EVENT] Author={event_yielded.author}, "
-                    f"Message={event_yielded.message}",
+                    f"[ADK EVENT] Author={event_yielded.author}, Message={event_yielded.message}",
                     flush=True,
                 )
         except Exception as e:
@@ -346,8 +351,7 @@ class TurnOrchestrator:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)
             print(
-                "[PROPOSAL CARDS] "
-                f"{[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
+                f"[PROPOSAL CARDS] {[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
                 flush=True,
             )
 

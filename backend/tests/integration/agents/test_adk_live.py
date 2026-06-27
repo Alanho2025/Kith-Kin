@@ -26,7 +26,7 @@ TEST_USER_ID = os.getenv("TEST_USER_ID", "00000000-0000-4000-8000-000000000001")
 
 @pytest.mark.skipif(
     not os.environ.get("GOOGLE_API_KEY"),
-    reason="GOOGLE_API_KEY environment variable not set for live smoke tests."
+    reason="GOOGLE_API_KEY environment variable not set for live smoke tests.",
 )
 @pytest.mark.anyio
 async def test_adk_live_flow(db_sessions) -> None:
@@ -37,9 +37,7 @@ async def test_adk_live_flow(db_sessions) -> None:
         return datetime.now(UTC)
 
     session_id = uuid4()
-    context = TrustedRequestContext(
-        session_id=session_id, user_id=TEST_USER_ID, origin="test"
-    )
+    context = TrustedRequestContext(session_id=session_id, user_id=TEST_USER_ID, origin="test")
 
     # Repos and Services
     memory_repo = MemoryRepository(db_sessions, clock_now)
@@ -100,7 +98,7 @@ async def test_adk_live_flow(db_sessions) -> None:
             language="en",
             text="Hello, how can I help you today?",
             revision=1,
-        )
+        ),
     )
     outcome_routine = await orchestrator.process_final_turn(event_routine, context)
     assert outcome_routine.route.route_type == RouteType.PASSIVE_TRANSLATION
@@ -121,7 +119,7 @@ async def test_adk_live_flow(db_sessions) -> None:
             language="en",
             text="Do you have any known drug allergies?",
             revision=1,
-        )
+        ),
     )
     outcome_response = await orchestrator.process_final_turn(event_response, context)
     assert outcome_response.route.route_type == RouteType.RESPONSE_NEEDED

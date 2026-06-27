@@ -23,12 +23,14 @@ def create_engine(database_url: str) -> AsyncEngine:
         connect_args = {"timeout": 30.0, "check_same_thread": False}
     engine = create_async_engine(database_url, future=True, connect_args=connect_args)
     if database_url.startswith("sqlite"):
+
         @event.listens_for(engine.sync_engine, "connect")
         def _configure_sqlite(dbapi_connection: Any, _connection_record: Any) -> None:
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
+
     return engine
 
 

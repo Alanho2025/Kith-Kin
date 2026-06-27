@@ -76,10 +76,7 @@ async def test_open_session_connects_to_gemini_live() -> None:
         # Yield one transcription message
         yield types.LiveServerMessage(
             server_content=types.LiveServerContent(
-                input_transcription=types.Transcription(
-                    text="Hello pharmacist",
-                    finished=True
-                )
+                input_transcription=types.Transcription(text="Hello pharmacist", finished=True)
             )
         )
 
@@ -106,7 +103,7 @@ async def test_open_session_connects_to_gemini_live() -> None:
         # Verify events async iterator yields mapped event
         iterator = port.events()
         event = await anext(iterator)
-        
+
         assert isinstance(event, ProviderTranscriptEvent)
         assert event.text == "Hello pharmacist"
         assert event.language == "en"
