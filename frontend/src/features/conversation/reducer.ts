@@ -1,9 +1,12 @@
 import type {
+  CardActionTypeView,
+  CardRiskLevelView,
   CardSetView,
   ConfirmationView,
   ConversationRuntimeEvent,
   ConversationState,
   GuardianWarningView,
+  ResponseCardView,
   SafeRuntimeMessageView,
   TranslationSegmentView,
   VisitSummaryView,
@@ -21,6 +24,7 @@ export const initialConversationState: ConversationState = {
   visibleError: null,
   summary: null,
   seenEventIds: new Set<string>(),
+  activeUtteranceId: null,
 };
 
 export type ConversationAction =
@@ -36,6 +40,28 @@ function recordEvent(
   seenEventIds.add(event.eventId);
   return { ...state, ...changes, seenEventIds };
 }
+
+interface RawCard {
+  card_id?: string;
+  cardId?: string;
+  zh_text?: string;
+  zhText?: string;
+  en_text?: string;
+  enText?: string;
+  risk_level?: string;
+  riskLevel?: string;
+  action_type?: string;
+  actionType?: string;
+  action?: { type?: string };
+}
+
+interface RawCardSet {
+  card_set_id?: string;
+  cardSetId?: string;
+  revision?: number;
+  cards?: RawCard[];
+}
+
 
 export function conversationReducer(
   state: ConversationState,
@@ -84,6 +110,7 @@ export function conversationReducer(
       return recordEvent(state, event, { status: "translating" });
     case "translation.final": {
       const payload = event.payload as TranslationSegmentView;
+      const isNew = state.activeUtteranceId !== payload.sourceTranscriptEventId;
       const exists = state.chineseSegments.some(
         (segment) => segment.segmentId === payload.segmentId,
       );
@@ -92,23 +119,47 @@ export function conversationReducer(
           ? { ...turn, translatedText: payload.translatedText }
           : turn,
       );
+      const nextSegments = isNew
+        ? [payload]
+        : exists
+        ? state.chineseSegments
+        : [...state.chineseSegments, payload];
+
       return recordEvent(state, event, {
         status: "listening",
         turns,
-        chineseSegments: exists ? state.chineseSegments : [...state.chineseSegments, payload],
+        chineseSegments: nextSegments,
+        activeUtteranceId: payload.sourceTranscriptEventId ?? null,
       });
     }
     case "route.decision":
     case "tool.status":
       return recordEvent(state, event, { status: "checking" });
     case "cards.render": {
-      const payload = event.payload as { cardSet: any };
-      const cardSet = payload.cardSet ? {
-        ...payload.cardSet,
-        cards: (payload.cardSet.cards || []).map((card: any) => ({
-          ...card,
-          actionType: card.actionType || card.action?.type || "no_action",
-        })),
+      const payload = event.payload as { cardSet: RawCardSet | null };
+      const rawCardSet = payload.cardSet;
+      const cardSet: CardSetView | null = rawCardSet ? {
+        cardSetId: rawCardSet.cardSetId || rawCardSet.card_set_id || "",
+        revision: rawCardSet.revision || 1,
+        cards: (rawCardSet.cards || []).map((card): ResponseCardView => {
+          const rawActionType = card.actionType || card.action_type || card.action?.type || "no_action";
+          const actionType: CardActionTypeView =
+            rawActionType === "speak" ||
+            rawActionType === "show_to_pharmacist" ||
+            rawActionType === "save_memory" ||
+            rawActionType === "notify_family" ||
+            rawActionType === "no_action"
+              ? rawActionType
+              : "no_action";
+
+          return {
+            cardId: card.cardId || card.card_id || "",
+            zhText: card.zhText || card.zh_text || "",
+            enText: card.enText || card.en_text || "",
+            riskLevel: (card.riskLevel || card.risk_level || "low") as CardRiskLevelView,
+            actionType,
+          };
+        }),
       } : null;
       return recordEvent(state, event, { activeCardSet: cardSet });
     }
@@ -118,15 +169,9 @@ export function conversationReducer(
         cardId: string;
         confirmationId: string;
       };
-      let card = state.activeCardSet?.cards.find(
+      const card = state.activeCardSet?.cards.find(
         (candidate) => candidate.cardId === payload.cardId,
       );
-      if (card) {
-        card = {
-          ...card,
-          actionType: card.actionType || (card as any).action?.type || "no_action",
-        };
-      }
       const confirmation: ConfirmationView | null = card
         ? {
             confirmationId: payload.confirmationId,
@@ -136,7 +181,22 @@ export function conversationReducer(
         : null;
       return recordEvent(state, event, { status: "needs_confirmation", confirmation });
     }
-    case "card.confirmed":
+    case "card.confirmed": {
+      const confirmedCard = state.confirmation?.card;
+      const turns = confirmedCard
+        ? [
+            ...state.turns,
+            {
+              utteranceId: `card-${event.eventId}`,
+              transcriptEventId: event.eventId,
+              speaker: "parent" as const,
+              sourceText: confirmedCard.enText,
+              translatedText: confirmedCard.zhText,
+            },
+          ]
+        : state.turns;
+      return recordEvent(state, event, { status: "speaking", confirmation: null, turns });
+    }
     case "audio.speaking":
       return recordEvent(state, event, { status: "speaking", confirmation: null });
     case "guardian.warning":

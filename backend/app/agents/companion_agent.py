@@ -73,8 +73,8 @@ def make_check_drug_interaction(adapter: McpToolAdapter) -> Callable[..., Any]:
     return check_drug_interaction
 
 
-def make_submit_response_cards() -> Callable[..., Any]:
-    """Factory to build submit_response_cards tool bound to the session state.
+def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., Any]:
+    """Factory to build submit_response_cards tool bound to the session state and clock.
 
     Returns:
         The submit_response_cards tool function.
@@ -92,7 +92,7 @@ def make_submit_response_cards() -> Callable[..., Any]:
             A status dictionary indicating submission success.
         """
         if isinstance(proposal, dict):
-            # Bulletproof preprocessing to guarantee successful Pydantic validation
+            # Preprocessing to check/validate timestamps and default fields
             card_set = proposal.setdefault("card_set", {})
             if isinstance(card_set, dict):
                 if not card_set.get("source_event_id"):
@@ -100,9 +100,21 @@ def make_submit_response_cards() -> Callable[..., Any]:
 
                 from datetime import UTC, datetime, timedelta
 
-                now = datetime.now(UTC)
-                card_set["generated_at"] = now.isoformat()
-                card_set["expires_at"] = (now + timedelta(minutes=15)).isoformat()
+                now_val = clock()
+                gen_str = card_set.get("generated_at")
+                exp_str = card_set.get("expires_at")
+                
+                try:
+                    gen_dt = datetime.fromisoformat(str(gen_str).replace("Z", "+00:00")) if gen_str else None
+                    exp_dt = datetime.fromisoformat(str(exp_str).replace("Z", "+00:00")) if exp_str else None
+                except Exception:
+                    gen_dt = None
+                    exp_dt = None
+
+                # Only override/shift if missing, invalid, or expired compared to current clock
+                if not gen_dt or not exp_dt or exp_dt <= gen_dt or exp_dt <= now_val:
+                    card_set["generated_at"] = now_val.isoformat()
+                    card_set["expires_at"] = (now_val + timedelta(minutes=15)).isoformat()
 
                 if not card_set.get("card_set_id"):
                     card_set["card_set_id"] = f"cards_{uuid4()}"
@@ -112,24 +124,13 @@ def make_submit_response_cards() -> Callable[..., Any]:
 
                 cards = card_set.setdefault("cards", [])
                 if isinstance(cards, list):
-                    if len(cards) == 0:
-                        cards.append(
-                            {
-                                "card_id": f"card_{uuid4()}",
-                                "card_type": "confirm_info",
-                                "zh_text": "确认中...",
-                                "en_text": "Confirming...",
-                                "risk_level": "low",
-                                "action": {"type": "no_action"},
-                                "requires_parent_confirmation": True,
-                                "requires_guardian_approval": True,
-                                "guardian_decision_id": f"gd_{uuid4()}",
-                            }
-                        )
                     for card in cards:
                         if isinstance(card, dict):
-                            card["requires_guardian_approval"] = True
-                            card["requires_parent_confirmation"] = True
+                            # Default gates if missing, but do not overwrite if present
+                            if card.get("requires_guardian_approval") is None:
+                                card["requires_guardian_approval"] = True
+                            if card.get("requires_parent_confirmation") is None:
+                                card["requires_parent_confirmation"] = True
 
                             if not card.get("card_id"):
                                 card["card_id"] = f"card_{uuid4()}"
@@ -159,13 +160,14 @@ def make_submit_response_cards() -> Callable[..., Any]:
                 tool_context.state["companion_proposal"] = proposal_obj.model_dump(mode="json")
             except ValidationError as exc:
                 logger.warning("CardSetProposal validation failed: %s", exc)
-                # Ultimate fallback to avoid any crash
+                # Keep original dict to fail closed gracefully at the validation boundary
                 tool_context.state["companion_proposal"] = proposal
         else:
             tool_context.state["companion_proposal"] = proposal.model_dump(mode="json")
         return {"status": "success", "message": "Cards proposed successfully."}
 
     return submit_response_cards
+
 
 
 def load_companion_prompt_template() -> str:
@@ -326,7 +328,7 @@ class CompanionAgent(Agent):
 
         # 2. Bind tools
         tools = [
-            make_submit_response_cards(),
+            make_submit_response_cards(self._clock),
         ]
         if mcp_adapter is not None:
             tools.append(make_memory_search(mcp_adapter))
