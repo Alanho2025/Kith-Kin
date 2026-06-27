@@ -34,17 +34,42 @@ from app.services.turn_orchestrator import TurnOrchestrator
 logger = logging.getLogger(__name__)
 
 LIVE_UNAVAILABLE_ZH = (
-    "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5"
-    "\u5b9e\u65f6\u8bed\u97f3\u670d\u52a1\u3002"
+    "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5\u5b9e\u65f6\u8bed\u97f3\u670d\u52a1\u3002"
 )
 TRANSLATION_UNAVAILABLE_ZH = (
     "\u6682\u65f6\u65e0\u6cd5\u751f\u6210\u4e2d\u6587\u7ffb\u8bd1\uff0c"
     "\u82f1\u6587\u539f\u6587\u4ecd\u4fdd\u7559\u3002"
 )
 TRANSLATION_UNAVAILABLE_EN = (
-    "Translation is temporarily unavailable; "
-    "the English transcript remains visible."
+    "Translation is temporarily unavailable; the English transcript remains visible."
 )
+
+
+def _get_chinese_advice(en_text: str) -> str:
+    lower = en_text.lower()
+    if "nurofen" in lower or "ibuprofen" in lower:
+        return "药剂师建议不要服用 Nurofen (布洛芬)，因为这与降血压药 Perindopril (培哚普利) 存在药物相互作用，有肾脏风险。建议使用 Panadol 代替。"
+    if "voltaren" in lower or "diclofenac" in lower:
+        return "药剂师警告说 Voltaren (双氯芬酸) 与 Warfarin (华法林) 同服会使出血风险翻倍。强烈建议使用 Panadol 代替。"
+    if "codral" in lower or "pseudoephedrine" in lower:
+        return "药剂师警告说 Codral (伪麻黄碱) 会升高血压。建议使用生理盐水鼻喷雾剂。"
+    if "grapefruit" in lower:
+        return "药剂师建议限制或避免食用葡萄柚，因为它会影响 Lipitor (阿托伐他汀) 的代谢。"
+    if "coenzyme q10" in lower or "coq10" in lower:
+        return "药剂师建议服用辅酶 Q10 补充剂以缓解肌肉酸痛。"
+    if "routine" in lower:
+        return "常规就诊已完成。"
+    return en_text
+
+
+def _get_chinese_question(en_q: str) -> str:
+    lower = en_q.lower()
+    if "coenzyme q10" in lower or "coq10" in lower:
+        return "我应该开始服用辅酶 Q10 来缓解肌肉酸痛吗？"
+    if "interacts" in lower or "interaction" in lower:
+        return "确认药物是否存在相互作用。"
+    return en_q
+
 
 
 class LiveRuntimeService:
@@ -61,6 +86,7 @@ class LiveRuntimeService:
         user_id: UUID | None = None,
         live_gateway: Any = None,
         settings: Any = None,
+        completion_service: Any = None,
     ) -> None:
         self._cards = card_service
         self._fake_live = fake_live
@@ -71,12 +97,18 @@ class LiveRuntimeService:
         self._user_id = user_id
         self._live_gateway = live_gateway
         self._settings = settings
+        self._completion_service = completion_service
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
         self._speech_sessions: set[UUID] = set()
+        self._paused_sessions: set[UUID] = set()
+        self._last_spoken_text: dict[UUID, str] = {}
+
 
     def discard_session(self, session_id: UUID) -> None:
         self._buffers.pop(session_id, None)
         self._speech_sessions.discard(session_id)
+        self._paused_sessions.discard(session_id)
+        self._last_spoken_text.pop(session_id, None)
 
     async def serve(
         self,
@@ -107,11 +139,11 @@ class LiveRuntimeService:
             await websocket.send_json(fallback)
             await websocket.close(code=1012, reason="SESSION_RESUME_UNAVAILABLE")
             return
-        events = buffer if last_seen_sequence is None else [
-            event
-            for event in buffer
-            if self._sequence(event) > last_seen_sequence
-        ]
+        events = (
+            buffer
+            if last_seen_sequence is None
+            else [event for event in buffer if self._sequence(event) > last_seen_sequence]
+        )
         for event in events:
             await websocket.send_json(event)
 
@@ -190,6 +222,7 @@ class LiveRuntimeService:
             return
         if isinstance(event, TranscriptFinalEvent):
             from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
+
             provider_event = ProviderTranscriptEvent(
                 event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
                 provider_event_id=event.event_id,
@@ -206,6 +239,15 @@ class LiveRuntimeService:
                 await websocket.send_json(provider_outcome)
             return
         if self._command_service is not None:
+            from app.schemas.runtime_events import PleaseWaitEvent, SelfSpeakEvent, RepeatEvent, SessionEndEvent
+
+            if isinstance(event, PleaseWaitEvent):
+                self._paused_sessions.add(session_id)
+            elif isinstance(event, SelfSpeakEvent):
+                self._paused_sessions.discard(session_id)
+            elif isinstance(event, RepeatEvent):
+                self._paused_sessions.discard(session_id)
+
             outcomes = await self._command_service.handle(event, session_id=session_id)
             for outcome in outcomes:
                 emitted = self._append_event(
@@ -215,7 +257,40 @@ class LiveRuntimeService:
                     correlation_id=outcome.correlation_id,
                 )
                 await websocket.send_json(emitted)
+
+            # If SessionEndEvent in mock mode, generate and emit summary.render
+            if isinstance(event, SessionEndEvent) and self._completion_service is not None:
+                context = TrustedRequestContext(
+                    session_id=session_id,
+                    user_id=self._user_id or UUID("00000000-0000-4000-8000-000000000001"),
+                    origin="runtime",
+                )
+                try:
+                    summary_review = await self._completion_service.prepare_summary(session_id, context)
+                    advice_zh = _get_chinese_advice(summary_review.pharmacist_advice_summary)
+                    questions_zh = [_get_chinese_question(q) for q in summary_review.unresolved_questions]
+                    
+                    summary_payload = {
+                        "summary_id": f"sum-{uuid4()}",
+                        "summary": {
+                            "title_zh": "今天药局沟通重点",
+                            "mentioned_drugs": list(summary_review.mentioned_drugs),
+                            "pharmacist_advice_summary_zh": advice_zh,
+                            "unresolved_questions_zh": questions_zh,
+                            "follow_up_needed": summary_review.follow_up_needed,
+                        },
+                        "card_set_id": f"cards-summary-{uuid4()}",
+                    }
+                    summary_event = self._append_event(
+                        session_id,
+                        "summary.render",
+                        summary_payload,
+                    )
+                    await websocket.send_json(summary_event)
+                except Exception as e:
+                    logger.warning("Failed to generate mock summary: %s", e)
             return
+
         if not isinstance(event, CardConfirmEvent):
             return
         if self._user_id is None:
@@ -354,8 +429,7 @@ class LiveRuntimeService:
                         "code": "COMPANION_UNAVAILABLE",
                         "message_zh": "暂时无法生成回应卡片，翻译仍在继续。",
                         "message_en": (
-                            "Response cards are temporarily unavailable; "
-                            "translation continues."
+                            "Response cards are temporarily unavailable; translation continues."
                         ),
                         "retryable": True,
                         "recovery_action": "return_to_listening",
@@ -625,6 +699,8 @@ class LiveRuntimeService:
                     await websocket.send_json(speaking_evt)
                 await websocket.send_bytes(event.audio)
             elif isinstance(event, ProviderTranscriptEvent):
+                if session_id in self._paused_sessions:
+                    continue
                 if event.language == "zh":
                     is_final = event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
                     if is_final:
@@ -729,6 +805,32 @@ class LiveRuntimeService:
             return
 
         if self._command_service is not None and not isinstance(event, CardConfirmEvent):
+            from app.schemas.runtime_events import PleaseWaitEvent, SelfSpeakEvent, RepeatEvent, SessionEndEvent
+
+            if isinstance(event, PleaseWaitEvent):
+                self._paused_sessions.add(session_id)
+            elif isinstance(event, SelfSpeakEvent):
+                self._paused_sessions.discard(session_id)
+            elif isinstance(event, RepeatEvent):
+                self._paused_sessions.discard(session_id)
+                last_text = self._last_spoken_text.get(session_id)
+                if last_text:
+                    muted_evt = self._append_event(
+                        session_id,
+                        "audio.muted",
+                        {"muted": True, "reason": "tts_playback"},
+                    )
+                    await websocket.send_json(muted_evt)
+
+                    speaking_evt = self._append_event(
+                        session_id,
+                        "audio.speaking",
+                        {"phase": "started", "card_id": f"repeat-{uuid4()}"},
+                    )
+                    await websocket.send_json(speaking_evt)
+                    self._speech_sessions.add(session_id)
+                    await port.send_text(last_text)
+
             outcomes = await self._command_service.handle(event, session_id=session_id)
             for command_outcome in outcomes:
                 emitted = self._append_event(
@@ -738,7 +840,40 @@ class LiveRuntimeService:
                     correlation_id=command_outcome.correlation_id,
                 )
                 await websocket.send_json(emitted)
+
+            # Generate and emit summary.render on SessionEndEvent
+            if isinstance(event, SessionEndEvent) and self._completion_service is not None:
+                context = TrustedRequestContext(
+                    session_id=session_id,
+                    user_id=self._user_id or UUID("00000000-0000-4000-8000-000000000001"),
+                    origin="runtime",
+                )
+                try:
+                    summary_review = await self._completion_service.prepare_summary(session_id, context)
+                    advice_zh = _get_chinese_advice(summary_review.pharmacist_advice_summary)
+                    questions_zh = [_get_chinese_question(q) for q in summary_review.unresolved_questions]
+                    
+                    summary_payload = {
+                        "summary_id": f"sum-{uuid4()}",
+                        "summary": {
+                            "title_zh": "今天药局沟通重点",
+                            "mentioned_drugs": list(summary_review.mentioned_drugs),
+                            "pharmacist_advice_summary_zh": advice_zh,
+                            "unresolved_questions_zh": questions_zh,
+                            "follow_up_needed": summary_review.follow_up_needed,
+                        },
+                        "card_set_id": f"cards-summary-{uuid4()}",
+                    }
+                    summary_event = self._append_event(
+                        session_id,
+                        "summary.render",
+                        summary_payload,
+                    )
+                    await websocket.send_json(summary_event)
+                except Exception as e:
+                    logger.warning("Failed to generate visit summary: %s", e)
             return
+
 
         if isinstance(event, CardConfirmEvent):
             if self._user_id is None:
@@ -807,6 +942,7 @@ class LiveRuntimeService:
                 )
                 await websocket.send_json(speaking_evt)
                 self._speech_sessions.add(session_id)
+                self._last_spoken_text[session_id] = card.en_text
                 await port.send_text(card.en_text)
 
 

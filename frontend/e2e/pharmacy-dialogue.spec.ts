@@ -105,6 +105,46 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     await expect(statusBar).toContainText("KK 正在说话", { timeout: 10000 });
     await expect(statusBar).toContainText("KK 正在聆听", { timeout: 25000 });
 
-    console.log("測試完成！三輪對話流程成功跑通。");
+    // --- 測試底部控制按鈕：請稍等、我自己說、重複、結束 ---
+    console.log("--- 測試底部控制按鈕 ---");
+
+    // 1. 點擊「请稍等」 -> 狀態改為「准备好了」
+    const pleaseWaitBtn = page.getByRole("button", { name: "请稍等" });
+    await expect(pleaseWaitBtn).toBeVisible();
+    await pleaseWaitBtn.click();
+    await expect(statusBar).toContainText("准备好了", { timeout: 5000 });
+
+    // 2. 點擊「我自己说」 -> 狀態改為「KK 正在聆听」
+    const selfSpeakBtn = page.getByRole("button", { name: "我自己说" });
+    await expect(selfSpeakBtn).toBeVisible();
+    await selfSpeakBtn.click();
+    await expect(statusBar).toContainText("KK 正在聆听", { timeout: 5000 });
+
+    // 3. 點擊「重复」 -> 重新播報最後一次的內容（先說話後聆聽）
+    const repeatBtn = page.getByRole("button", { name: "重复" });
+    await expect(repeatBtn).toBeVisible();
+    await repeatBtn.click();
+    await expect(statusBar).toContainText("KK 正在说话", { timeout: 5000 });
+    await expect(statusBar).toContainText("KK 正在聆听", { timeout: 15000 });
+
+    // 4. 點擊「结束」 -> 渲染結算報告頁面
+    const endBtn = page.getByRole("button", { name: "结束" });
+    await expect(endBtn).toBeVisible();
+    await endBtn.click();
+
+    // 驗證進入結算報告頁，確認摘要標題存在
+    const summaryTitle = page.locator("main h1");
+    await expect(summaryTitle).toContainText("今天药局沟通重点", { timeout: 10000 });
+
+    // 5. 點擊結算頁的「发送给家人」 -> 重啟回到首頁開始畫面
+    const sendFamilyBtn = page.getByRole("button", { name: "发送给家人" });
+    await expect(sendFamilyBtn).toBeVisible();
+    await sendFamilyBtn.click();
+
+    // 驗證是否重新回到 StartPage 首頁
+    const startDialogueBtn = page.getByRole("button", { name: "开始药房对话" });
+    await expect(startDialogueBtn).toBeVisible({ timeout: 5000 });
+
+    console.log("測試完成！三輪對話與控制按鈕流程全部成功跑通。");
   });
 });

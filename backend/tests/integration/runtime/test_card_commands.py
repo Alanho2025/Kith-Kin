@@ -3,7 +3,14 @@ from uuid import UUID
 
 from app.core.constants import CardActionType
 from app.domain.credentials import TrustedRequestContext
-from app.schemas.runtime_events import CardConfirmEvent, CardSelectEvent, SelfSpeakEvent
+from app.schemas.runtime_events import (
+    CardConfirmEvent,
+    CardSelectEvent,
+    PleaseWaitEvent,
+    RepeatEvent,
+    SelfSpeakEvent,
+    SessionEndEvent,
+)
 from app.services.card_service import CardService
 from app.services.confirmed_action_executor import ConfirmedActionExecutor
 from app.services.runtime_command_service import RuntimeCommandService
@@ -117,6 +124,77 @@ async def test_self_speak_restores_listening_without_card_action() -> None:
 
     events = await commands.handle(self_speak_event(), session_id=SESSION_ID)
 
-    assert events[0].event_type == "audio.listening"
-    assert events[0].payload == {"active": True}
+    # 1. unmuting event should be emitted
+    assert len(events) == 2
+    assert events[0].event_type == "audio.muted"
+    assert events[0].payload == {"muted": False, "reason": "user_control"}
+    assert events[1].event_type == "audio.listening"
+    assert events[1].payload == {"active": True}
     assert executor.action_count == 0
+
+
+async def test_please_wait_button_triggers_hold() -> None:
+    executor = ConfirmedActionExecutor()
+    commands = RuntimeCommandService(CardService(lambda: NOW, executor), USER_ID)
+
+    event = PleaseWaitEvent.model_validate(
+        {
+            "schema_version": "0.1",
+            "event_id": "evt-wait-1",
+            "event_type": "control.please_wait",
+            "session_id": str(SESSION_ID),
+            "sequence": 15,
+            "timestamp": NOW.isoformat(),
+            "correlation_id": None,
+            "payload": {},
+        }
+    )
+    events = await commands.handle(event, session_id=SESSION_ID)
+    assert len(events) == 2
+    assert events[0].event_type == "audio.muted"
+    assert events[0].payload == {"muted": True, "reason": "user_control"}
+    assert events[1].event_type == "audio.listening"
+    assert events[1].payload == {"active": False}
+
+
+async def test_repeat_button_replays_last_translation() -> None:
+    executor = ConfirmedActionExecutor()
+    commands = RuntimeCommandService(CardService(lambda: NOW, executor), USER_ID)
+
+    event = RepeatEvent.model_validate(
+        {
+            "schema_version": "0.1",
+            "event_id": "evt-repeat-1",
+            "event_type": "control.repeat",
+            "session_id": str(SESSION_ID),
+            "sequence": 16,
+            "timestamp": NOW.isoformat(),
+            "correlation_id": None,
+            "payload": {"target": "last_translation"},
+        }
+    )
+    events = await commands.handle(event, session_id=SESSION_ID)
+    # The command should succeed and return some feedback
+    assert len(events) > 0
+
+
+async def test_session_end_terminates_session() -> None:
+    executor = ConfirmedActionExecutor()
+    commands = RuntimeCommandService(CardService(lambda: NOW, executor), USER_ID)
+
+    event = SessionEndEvent.model_validate(
+        {
+            "schema_version": "0.1",
+            "event_id": "evt-end-1",
+            "event_type": "session.end",
+            "session_id": str(SESSION_ID),
+            "sequence": 17,
+            "timestamp": NOW.isoformat(),
+            "correlation_id": None,
+            "payload": {"reason": "user_completed"},
+        }
+    )
+    events = await commands.handle(event, session_id=SESSION_ID)
+    assert len(events) == 1
+    assert events[0].event_type == "session.ended"
+    assert events[0].payload["reason"] == "user_completed"

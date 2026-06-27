@@ -39,9 +39,7 @@ class CardService:
 
     def discard_session(self, session_id: UUID) -> None:
         sid = str(session_id)
-        self._card_sets = {
-            key: value for key, value in self._card_sets.items() if key[0] != sid
-        }
+        self._card_sets = {key: value for key, value in self._card_sets.items() if key[0] != sid}
         self._card_contexts = {
             key: value
             for key, value in self._card_contexts.items()

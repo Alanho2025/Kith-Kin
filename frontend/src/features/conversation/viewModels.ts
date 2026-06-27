@@ -88,6 +88,7 @@ export interface ConversationState {
   visibleError: SafeRuntimeMessageView | null;
   summary: VisitSummaryView | null;
   seenEventIds: ReadonlySet<string>;
+  activeUtteranceId: string | null;
 }
 
 export interface ConversationRuntimeEvent {

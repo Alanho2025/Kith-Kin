@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -33,11 +34,20 @@ logger = logging.getLogger(__name__)
 # than relying on the companion LLM to remember to call the tool. Safety backstop.
 INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
     {
-        "ibuprofen", "diclofenac", "naproxen", "aspirin",
+        "ibuprofen",
+        "diclofenac",
+        "naproxen",
+        "aspirin",
         "warfarin",
-        "lisinopril", "perindopril", "ramipril",
-        "candesartan", "telmisartan", "irbesartan",
-        "amlodipine", "atorvastatin", "rosuvastatin",
+        "lisinopril",
+        "perindopril",
+        "ramipril",
+        "candesartan",
+        "telmisartan",
+        "irbesartan",
+        "amlodipine",
+        "atorvastatin",
+        "rosuvastatin",
     }
 )
 
@@ -216,9 +226,7 @@ class TurnOrchestrator:
         if getattr(companion_any, "_session_service", None) is not None:
             try:
                 sid = UUID(str(event.session_id))
-                cached = getattr(
-                    companion_any._session_service, "prefetch_cache", {}
-                ).get(sid, [])
+                cached = getattr(companion_any._session_service, "prefetch_cache", {}).get(sid, [])
                 for val in cached:
                     advice = val.get("pharmacist_advice_summary", "")
                     unresolved = val.get("unresolved_questions", [])
@@ -244,10 +252,12 @@ class TurnOrchestrator:
         )
 
         # Bind tools
+        submit_clock = self._clock or (lambda: datetime.now(timezone.utc))
+
         tools = [
             make_memory_search(mcp_adapter),
             make_check_drug_interaction(mcp_adapter),
-            make_submit_response_cards(),
+            make_submit_response_cards(clock = submit_clock),
         ]
 
         # Use the companion ADK agent instance and clone it with bound tools/prompts
