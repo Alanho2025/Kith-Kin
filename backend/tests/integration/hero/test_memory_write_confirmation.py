@@ -29,10 +29,11 @@ async def test_memory_write_confirmation(db_sessions, first_visit_transcript) ->
     memory_repo = MemoryRepository(db_sessions, clock.now)
     notification_repo = NotificationRepository(db_sessions, clock.now)
     visit_repo = VisitRepository(db_sessions)
-    
+
     session_service = SessionService(session_store, clock.now, visit_repo)
-    
+
     session_events = []
+
     def get_session_events(sid: UUID):
         return session_events
 
@@ -41,21 +42,21 @@ async def test_memory_write_confirmation(db_sessions, first_visit_transcript) ->
         notification_repository=notification_repo,
         get_session_events=get_session_events,
     )
-    
+
     confirmation_repository = InMemoryConfirmationRepository()
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
-    
+
     card_service = CardService(
         clock=clock.now,
         executor=completion_executor,
         repository=confirmation_repository,
     )
-    
+
     session = await session_service.create(user_id=TEST_USER_ID, encounter_type="pharmacy")
     context = TrustedRequestContext(
         session_id=session.session_id, user_id=TEST_USER_ID, origin="test"
     )
-    
+
     prov_evt = first_visit_transcript[0]
     event = TranscriptFinalEvent(
         schema_version="0.1",
@@ -71,17 +72,17 @@ async def test_memory_write_confirmation(db_sessions, first_visit_transcript) ->
             language=prov_evt.language,
             text=prov_evt.text,
             revision=prov_evt.revision,
-        )
+        ),
     )
     session_events.append(event.model_dump(mode="json"))
-    
+
     # 1. Draft is prepared, but not confirmed yet
     await completion_service.prepare_summary(session.session_id, context)
-    
+
     # DB remains empty at this point
     recent_visits = await visit_repo.recent_for_user(TEST_USER_ID)
     assert len(recent_visits) == 0
-    
+
     # 2. Select card (still pending confirmation)
     card_set_id = f"cards_{uuid4()}"
     save_card = ResponseCard(
@@ -104,19 +105,19 @@ async def test_memory_write_confirmation(db_sessions, first_visit_transcript) ->
         cards=(save_card,),
     )
     card_service.register_card_set(card_set, context)
-    
+
     selected = await card_service.select(
         CardSelectCommand(card_set_id=card_set_id, card_id=save_card.card_id, revision=1),
         context,
     )
-    
+
     # DB still empty
     recent_visits = await visit_repo.recent_for_user(TEST_USER_ID)
     assert len(recent_visits) == 0
-    
+
     # 3. Confirm card -> triggers memory write
     await card_service.confirm_selected(selected.confirmation_id, context)
-    
+
     # Now it is persisted
     recent_visits = await visit_repo.recent_for_user(TEST_USER_ID)
     assert len(recent_visits) == 1

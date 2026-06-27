@@ -30,6 +30,7 @@ def make_memory_search(adapter: McpToolAdapter) -> Callable[..., Any]:
     Returns:
         The memory_search tool function.
     """
+
     async def memory_search(query: str, tags: list[str]) -> dict[str, Any]:
         """Search the patient's memory store for relevant context or profile details.
 
@@ -42,6 +43,7 @@ def make_memory_search(adapter: McpToolAdapter) -> Callable[..., Any]:
         """
         res = await adapter.memory_search(query, tuple(tags))
         return res.model_dump(mode="json")
+
     return memory_search
 
 
@@ -54,6 +56,7 @@ def make_check_drug_interaction(adapter: McpToolAdapter) -> Callable[..., Any]:
     Returns:
         The check_drug_interaction tool function.
     """
+
     async def check_drug_interaction(new_drug: str, current_meds: list[str]) -> dict[str, Any]:
         """Check for potential drug interactions between a new drug and current medications.
 
@@ -66,17 +69,19 @@ def make_check_drug_interaction(adapter: McpToolAdapter) -> Callable[..., Any]:
         """
         res = await adapter.check_drug_interaction(new_drug, tuple(current_meds))
         return res.model_dump(mode="json")
+
     return check_drug_interaction
 
 
-def make_submit_response_cards() -> Callable[..., Any]:
-    """Factory to build submit_response_cards tool bound to the session state.
+def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., Any]:
+    """Factory to build submit_response_cards tool bound to the session state and clock.
 
     Returns:
         The submit_response_cards tool function.
     """
+
     async def submit_response_cards(
-        proposal: CardSetProposal, tool_context: ToolContext
+        proposal: CardSetProposal | dict[str, Any], tool_context: ToolContext
     ) -> dict[str, Any]:
         """Submit the proposed response cards for the patient to view and confirm.
 
@@ -86,9 +91,83 @@ def make_submit_response_cards() -> Callable[..., Any]:
         Returns:
             A status dictionary indicating submission success.
         """
-        tool_context.state["companion_proposal"] = proposal.model_dump(mode="json")
+        if isinstance(proposal, dict):
+            # Preprocessing to check/validate timestamps and default fields
+            card_set = proposal.setdefault("card_set", {})
+            if isinstance(card_set, dict):
+                if not card_set.get("source_event_id"):
+                    card_set["source_event_id"] = f"evt_{uuid4()}"
+
+                from datetime import UTC, datetime, timedelta
+
+                now_val = clock()
+                gen_str = card_set.get("generated_at")
+                exp_str = card_set.get("expires_at")
+                
+                try:
+                    gen_dt = datetime.fromisoformat(str(gen_str).replace("Z", "+00:00")) if gen_str else None
+                    exp_dt = datetime.fromisoformat(str(exp_str).replace("Z", "+00:00")) if exp_str else None
+                except Exception:
+                    gen_dt = None
+                    exp_dt = None
+
+                # Only override/shift if missing, invalid, or expired compared to current clock
+                if not gen_dt or not exp_dt or exp_dt <= gen_dt or exp_dt <= now_val:
+                    card_set["generated_at"] = now_val.isoformat()
+                    card_set["expires_at"] = (now_val + timedelta(minutes=15)).isoformat()
+
+                if not card_set.get("card_set_id"):
+                    card_set["card_set_id"] = f"cards_{uuid4()}"
+
+                if not card_set.get("revision"):
+                    card_set["revision"] = 1
+
+                cards = card_set.setdefault("cards", [])
+                if isinstance(cards, list):
+                    for card in cards:
+                        if isinstance(card, dict):
+                            # Default gates if missing, but do not overwrite if present
+                            if card.get("requires_guardian_approval") is None:
+                                card["requires_guardian_approval"] = True
+                            if card.get("requires_parent_confirmation") is None:
+                                card["requires_parent_confirmation"] = True
+
+                            if not card.get("card_id"):
+                                card["card_id"] = f"card_{uuid4()}"
+
+                            if not card.get("card_type"):
+                                card["card_type"] = "confirm_info"
+
+                            if not card.get("risk_level"):
+                                card["risk_level"] = "low"
+
+                            if not card.get("guardian_decision_id"):
+                                card["guardian_decision_id"] = f"gd_{uuid4()}"
+
+                            action = card.setdefault("action", {})
+                            if isinstance(action, dict):
+                                if not action.get("type"):
+                                    action["type"] = "no_action"
+
+            proposal_hash = proposal.get("proposal_hash")
+            if not isinstance(proposal_hash, str) or len(proposal_hash) < 8:
+                proposal["proposal_hash"] = f"hash_{uuid4()}"
+
+            from pydantic import ValidationError
+
+            try:
+                proposal_obj = CardSetProposal.model_validate(proposal)
+                tool_context.state["companion_proposal"] = proposal_obj.model_dump(mode="json")
+            except ValidationError as exc:
+                logger.warning("CardSetProposal validation failed: %s", exc)
+                # Keep original dict to fail closed gracefully at the validation boundary
+                tool_context.state["companion_proposal"] = proposal
+        else:
+            tool_context.state["companion_proposal"] = proposal.model_dump(mode="json")
         return {"status": "success", "message": "Cards proposed successfully."}
+
     return submit_response_cards
+
 
 
 def load_companion_prompt_template() -> str:
@@ -249,7 +328,7 @@ class CompanionAgent(Agent):
 
         # 2. Bind tools
         tools = [
-            make_submit_response_cards(),
+            make_submit_response_cards(self._clock),
         ]
         if mcp_adapter is not None:
             tools.append(make_memory_search(mcp_adapter))
@@ -284,6 +363,7 @@ class CompanionAgent(Agent):
         ).message
 
         import os
+
         api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key and hasattr(self, "_settings") and self._settings:
             api_key = getattr(self._settings, "google_api_key", None)
@@ -305,9 +385,9 @@ class CompanionAgent(Agent):
             # Generate mock card proposal deterministically based on text
             from app.core.constants import CardActionType, CardRiskLevel
             from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
-            
+
             text_lower = event.payload.text.lower()
-            
+
             if "save the summary" in text_lower or "save this" in text_lower:
                 mock_card = ResponseCard(
                     card_id=f"card_{uuid4()}",
@@ -425,7 +505,7 @@ class CompanionAgent(Agent):
                 ),
                 proposal_hash="dummy_hash",
             )
-            
+
             # Write to the local runner session
             session = await session_service.get_session(
                 app_name="agents", user_id=user_id, session_id=session_id

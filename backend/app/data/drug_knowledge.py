@@ -80,7 +80,6 @@ DRUG_PROFILES = {
         "indications": ["Hypertension", "Cardiovascular risk reduction"],
         "common_in_elderly": True,
     },
-
     # --- Cardiovascular: Cholesterol ---
     "rosuvastatin": {
         "class": "Statin (HMG-CoA Reductase Inhibitor)",
@@ -103,7 +102,6 @@ DRUG_PROFILES = {
             "Metabolised by CYP3A4 — many drug interactions possible",
         ],
     },
-
     # --- Diabetes ---
     "metformin": {
         "class": "Biguanide",
@@ -116,7 +114,6 @@ DRUG_PROFILES = {
             "May cause gastrointestinal upset (diarrhoea, nausea) — slow titration helps",
         ],
     },
-
     # --- Anticoagulation ---
     "warfarin": {
         "class": "Vitamin K Antagonist (Anticoagulant)",
@@ -150,7 +147,6 @@ DRUG_PROFILES = {
             "Similar profile to apixaban",
         ],
     },
-
     # --- Mental Health ---
     "sertraline": {
         "class": "SSRI Antidepressant",
@@ -172,7 +168,6 @@ DRUG_PROFILES = {
             "Same class warnings as sertraline",
         ],
     },
-
     # --- Gastrointestinal ---
     "pantoprazole": {
         "class": "Proton Pump Inhibitor (PPI)",
@@ -295,12 +290,14 @@ SUBSTANCES = {
 # Key: (drug_a_class, drug_b_class) → risk_level, description
 # ============================================================
 
+
 class Interaction:
     def __init__(self, risk: str, mechanism: str, recommendation: str, source: str):
-        self.risk = risk          # "HIGH", "MODERATE", "LOW", "MONITOR"
+        self.risk = risk  # "HIGH", "MODERATE", "LOW", "MONITOR"
         self.mechanism = mechanism
         self.recommendation = recommendation
         self.source = source
+
 
 # Build class maps for matching
 def _build_class_map():
@@ -319,6 +316,7 @@ def _build_class_map():
             m[cls] = []
         m[cls].append(name)
     return m
+
 
 # Interaction rules — class-level matching with specific exceptions
 INTERACTIONS = [
@@ -404,7 +402,6 @@ INTERACTIONS = [
         ),
         source="MSD Manual; Australian Prescriber",
     ),
-
     # ===== Statins vs interactions =====
     # Statins + Grapefruit
     Interaction(
@@ -437,7 +434,6 @@ INTERACTIONS = [
         ),
         source="Australian Medicines Handbook; TGA",
     ),
-
     # ===== Metformin interactions =====
     # Metformin + Contrast Dye / Surgery
     Interaction(
@@ -470,7 +466,6 @@ INTERACTIONS = [
         ),
         source="Diabetes Australia; NPS MedicineWise",
     ),
-
     # ===== Decongestants vs Hypertension =====
     # Pseudoephedrine / Phenylephrine + BP meds
     Interaction(
@@ -489,7 +484,6 @@ INTERACTIONS = [
         ),
         source="NPS MedicineWise; TGA scheduling (Australia)",
     ),
-
     # ===== PPI interactions =====
     # PPIs + Clopidogrel
     Interaction(
@@ -512,9 +506,11 @@ INTERACTIONS = [
 # SECTION 4: Lookup Functions
 # ============================================================
 
+
 def _normalise(name: str) -> str:
     """Normalise drug name for fuzzy matching: lowercase, strip."""
     return name.lower().strip().rstrip(".")
+
 
 def drug_lookup(query: str) -> dict | None:
     """
@@ -610,8 +606,9 @@ def check_interaction(entity_a: str, entity_b: str) -> dict | None:
         # Check if both drug classes appear in the interaction description
         for keyword_a in _class_keywords(class_a):
             for keyword_b in _class_keywords(class_b):
-                if (keyword_a in mech_lower or keyword_a in rec_lower) and \
-                   (keyword_b in mech_lower or keyword_b in rec_lower):
+                if (keyword_a in mech_lower or keyword_a in rec_lower) and (
+                    keyword_b in mech_lower or keyword_b in rec_lower
+                ):
                     relevant = True
                     break
             if relevant:
@@ -638,22 +635,71 @@ def _class_keywords(drug_class: str) -> list:
     # Add synonyms
     synonyms = {
         "ACE Inhibitor": ["ace inhibitor", "ace inhibitors", "perindopril", "ramipril"],
-        "Angiotensin II Receptor Blocker (ARB)": ["arb", "angiotensin", "candesartan", "telmisartan", "irbesartan"],
+        "Angiotensin II Receptor Blocker (ARB)": [
+            "arb",
+            "angiotensin",
+            "candesartan",
+            "telmisartan",
+            "irbesartan",
+        ],
         "Calcium Channel Blocker (Dihydropyridine)": ["calcium channel blocker", "amlodipine"],
-        "Statin (HMG-CoA Reductase Inhibitor)": ["statin", "statins", "atorvastatin", "rosuvastatin"],
+        "Statin (HMG-CoA Reductase Inhibitor)": [
+            "statin",
+            "statins",
+            "atorvastatin",
+            "rosuvastatin",
+        ],
         "NSAID": ["nsaid", "nsaids", "anti-inflammatory", "ibuprofen", "diclofenac", "naproxen"],
         "Antiplatelet (low dose 100mg)": ["aspirin", "antiplatelet"],
         "Vitamin K Antagonist (Anticoagulant)": ["warfarin", "anticoagulant", "anticoagulants"],
-        "Direct Oral Anticoagulant (Factor Xa Inhibitor)": ["anticoagulant", "anticoagulants", "apixaban", "rivaroxaban", "eliquis", "xarelto"],
-        "SSRI Antidepressant": ["ssri", "antidepressant", "sertraline", "escitalopram", "zoloft", "lexapro"],
+        "Direct Oral Anticoagulant (Factor Xa Inhibitor)": [
+            "anticoagulant",
+            "anticoagulants",
+            "apixaban",
+            "rivaroxaban",
+            "eliquis",
+            "xarelto",
+        ],
+        "SSRI Antidepressant": [
+            "ssri",
+            "antidepressant",
+            "sertraline",
+            "escitalopram",
+            "zoloft",
+            "lexapro",
+        ],
         "Biguanide": ["metformin", "diabetes"],
         "Proton Pump Inhibitor (PPI)": ["ppi", "pantoprazole", "esomeprazole", "omeprazole"],
-        "Decongestant (sympathomimetic)": ["decongestant", "pseudoephedrine", "phenylephrine", "sudafed", "codral"],
+        "Decongestant (sympathomimetic)": [
+            "decongestant",
+            "pseudoephedrine",
+            "phenylephrine",
+            "sudafed",
+            "codral",
+        ],
         # Substance classes
-        "CYP3A4 Inhibitor (Dietary)": ["grapefruit", "grapefruit juice", "cyp3a4", "seville oranges"],
-        "CNS Depressant / Hepatotoxin (Dietary)": ["alcohol", "beer", "wine", "spirits", "ethanol", "lactic acidosis"],
+        "CYP3A4 Inhibitor (Dietary)": [
+            "grapefruit",
+            "grapefruit juice",
+            "cyp3a4",
+            "seville oranges",
+        ],
+        "CNS Depressant / Hepatotoxin (Dietary)": [
+            "alcohol",
+            "beer",
+            "wine",
+            "spirits",
+            "ethanol",
+            "lactic acidosis",
+        ],
         "CYP2C9 / OATP Inhibitor (Dietary)": ["cranberry", "cranberry juice", "cyp2c9", "warfarin"],
-        "CYP3A4 / P-glycoprotein Inducer (Herbal)": ["st john", "st. john", "hypericum", "cyp3a4", "p-glycoprotein"],
+        "CYP3A4 / P-glycoprotein Inducer (Herbal)": [
+            "st john",
+            "st. john",
+            "hypericum",
+            "cyp3a4",
+            "p-glycoprotein",
+        ],
     }
     for cls, syns in synonyms.items():
         if drug_class.lower() == cls.lower():
@@ -695,7 +741,11 @@ SCENARIOS = [
         "patient_profile": {
             "name": "李叔叔",
             "age": 74,
-            "medications": ["warfarin 3mg daily (INR target 2.0-3.0)", "metformin 1000mg twice daily", "rosuvastatin 10mg daily"],
+            "medications": [
+                "warfarin 3mg daily (INR target 2.0-3.0)",
+                "metformin 1000mg twice daily",
+                "rosuvastatin 10mg daily",
+            ],
             "allergies": [],
             "conditions": ["Atrial fibrillation", "Type 2 diabetes", "Hypercholesterolaemia"],
         },
@@ -790,11 +840,19 @@ if __name__ == "__main__":
 
     # Test 2: Brand name lookup
     result = drug_lookup("Norvasc")
-    print(f"[PASS] Norvasc → {result['name']} ({result['class']})" if result else "[FAIL] Norvasc not found")
+    print(
+        f"[PASS] Norvasc → {result['name']} ({result['class']})"
+        if result
+        else "[FAIL] Norvasc not found"
+    )
 
     # Test 3: OTC lookup
     result = drug_lookup("Nurofen")
-    print(f"[PASS] Nurofen → {result['name']} ({result['class']})" if result else "[FAIL] Nurofen not found")
+    print(
+        f"[PASS] Nurofen → {result['name']} ({result['class']})"
+        if result
+        else "[FAIL] Nurofen not found"
+    )
 
     # Test 4: Australian brand
     result = drug_lookup("Coversyl")
@@ -802,7 +860,11 @@ if __name__ == "__main__":
 
     # Test 5: Substance lookup
     result = substance_lookup("grapefruit")
-    print(f"[PASS] grapefruit → substance ({result['class']})" if result else "[FAIL] grapefruit not found")
+    print(
+        f"[PASS] grapefruit → substance ({result['class']})"
+        if result
+        else "[FAIL] grapefruit not found"
+    )
 
     # Test 6: Drug × Substance interaction (the Scenario 04 gap)
     result = check_interaction("atorvastatin", "grapefruit")

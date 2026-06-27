@@ -107,8 +107,7 @@ class MemoryRepository:
 
 def _includes(request: RetrievalRequest, category: RetrievalCategory) -> bool:
     return (
-        request.category in {RetrievalCategory.PROFILE, category}
-        or category.value in request.tags
+        request.category in {RetrievalCategory.PROFILE, category} or category.value in request.tags
     )
 
 
@@ -123,9 +122,7 @@ def _tag_match_count(row_tags: Sequence[str], request: RetrievalRequest, content
 
 def _medication_snippet(row: Medication, request: RetrievalRequest) -> RetrievalSnippet:
     content = (
-        f"Medication: {row.name}. "
-        f"Dose: {row.dose or 'unknown'}. "
-        f"Notes: {row.notes or 'none'}."
+        f"Medication: {row.name}. Dose: {row.dose or 'unknown'}. Notes: {row.notes or 'none'}."
     )
     return RetrievalSnippet(
         record_id=row.id,
