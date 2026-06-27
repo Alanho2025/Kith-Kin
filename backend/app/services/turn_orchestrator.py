@@ -28,6 +28,19 @@ from app.services.card_service import CardService
 
 logger = logging.getLogger(__name__)
 
+# Specific drug names (not class words like "nsaid"/"antibiotic") that, when
+# named in a turn, must trigger a drug-interaction check deterministically rather
+# than relying on the companion LLM to remember to call the tool. Safety backstop.
+INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
+    {
+        "ibuprofen", "diclofenac", "naproxen", "aspirin",
+        "warfarin",
+        "lisinopril", "perindopril", "ramipril",
+        "candesartan", "telmisartan", "irbesartan",
+        "amlodipine", "atorvastatin", "rosuvastatin",
+    }
+)
+
 
 class RouterPort(Protocol):
     async def route(self, event: TranscriptFinalEvent) -> RouteDecision: ...
@@ -176,6 +189,20 @@ class TurnOrchestrator:
                             allergies.extend(content.get("allergies", []))
             except Exception:
                 logger.warning("Failed to warm patient profile in turn orchestrator")
+
+            # Deterministic drug-interaction safety check: if the turn names a
+            # specific drug, always run check_drug_interaction — don't rely on the
+            # companion LLM to remember to call it. The result is traced; the
+            # companion still produces the confirmation card.
+            text_lower = event.payload.text.lower()
+            named_drugs = [name for name in INTERACTION_DRUG_NAMES if name in text_lower]
+            if named_drugs:
+                new_drug = named_drugs[0]
+                current_meds = tuple([*named_drugs[1:], *meds])
+                try:
+                    await mcp_adapter.check_drug_interaction(new_drug, current_meds)
+                except Exception:
+                    logger.warning("Deterministic drug-interaction check failed")
 
         prior_summary = None
         if getattr(companion_any, "_session_service", None) is not None:

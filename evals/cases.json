@@ -54,9 +54,7 @@
         "Router selects pharmacy_risk.",
         "memory_search occurs before check_drug_interaction.",
         "The card asks the pharmacist to confirm rather than giving medical advice."
-      ],
-      "deferred": true,
-      "deferred_reason": "Pending deterministic check_drug_interaction: the interaction check is currently LLM-driven and not always called (flaky). Safety should guarantee it for named-drug turns rather than relying on the model."
+      ]
     },
     {
       "id": "E03",

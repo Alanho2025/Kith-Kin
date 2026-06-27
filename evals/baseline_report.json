@@ -1,14 +1,14 @@
 {
   "schema_version": "1.1.0",
   "suite_name": "kithkin-agent-acceptance",
-  "recorded_at": "2026-06-27T02:41:54.375201Z",
+  "recorded_at": "2026-06-27T02:59:22.376803Z",
   "summary": {
     "total": 15,
     "passed": 15,
     "failed": 0,
-    "deferred": 1,
-    "p0_total": 13,
-    "p0_passed": 13,
+    "deferred": 0,
+    "p0_total": 14,
+    "p0_passed": 14,
     "status": "pass"
   },
   "results": [
@@ -61,7 +61,7 @@
       "id": "E02",
       "title": "Known new medicine triggers memory and interaction tools",
       "priority": "P0",
-      "deferred": true,
+      "deferred": false,
       "status": "pass",
       "observed": {
         "route": "pharmacy_risk",
