@@ -13,7 +13,16 @@ export type ConversationStatus =
 
 export interface TranslationSegmentView {
   segmentId: string;
+  sourceTranscriptEventId?: string;
   translatedText: string;
+}
+
+export interface ConversationTurnView {
+  utteranceId: string;
+  transcriptEventId: string;
+  speaker: "parent" | "pharmacist" | "unknown";
+  sourceText: string;
+  translatedText: string | null;
 }
 
 export type CardRiskLevelView = "normal" | "caution" | "privacy" | "medical" | "urgent";
@@ -71,6 +80,7 @@ export interface VisitSummaryView {
 export interface ConversationState {
   status: ConversationStatus;
   partialEnglish: string;
+  turns: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
   activeCardSet: CardSetView | null;
   confirmation: ConfirmationView | null;

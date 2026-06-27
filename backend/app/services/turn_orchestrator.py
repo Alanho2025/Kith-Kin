@@ -107,6 +107,7 @@ class TurnOrchestrator:
         self,
         event: TranscriptFinalEvent,
         context: TrustedRequestContext,
+        conversation_context: str | None = None,
     ) -> TurnOutcome:
         """Process the final transcript turn by executing the ADK orchestration graph.
 
@@ -234,9 +235,13 @@ class TurnOrchestrator:
         # Load prompt instruction
         base_prompt = load_companion_prompt_template()
         companion_instruction = build_companion_instruction(
-            base_prompt, meds, allergies, prior_summary
+            base_prompt, meds, allergies, prior_summary, conversation_context
         )
-        print(f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, prior: {prior_summary}", flush=True)
+        print(
+            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, "
+            f"prior: {prior_summary}",
+            flush=True,
+        )
 
         # Bind tools
         tools = [
@@ -299,7 +304,11 @@ class TurnOrchestrator:
                 session_id=session_id,
                 new_message=new_message,
             ):
-                print(f"[ADK EVENT] Author={event_yielded.author}, Message={event_yielded.message}", flush=True)
+                print(
+                    f"[ADK EVENT] Author={event_yielded.author}, "
+                    f"Message={event_yielded.message}",
+                    flush=True,
+                )
         except Exception as e:
             logger.exception("ADK session execution failed")
             raise ValueError("COMPANION_UNAVAILABLE") from e
@@ -336,10 +345,17 @@ class TurnOrchestrator:
             if not proposal_data:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)
-            print(f"[PROPOSAL CARDS] {[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}", flush=True)
+            print(
+                "[PROPOSAL CARDS] "
+                f"{[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
+                flush=True,
+            )
 
             if not card_review_data:
-                logger.info("card_review_data missing from session state; running deterministic card review fallback")
+                logger.info(
+                    "card_review_data missing from session state; "
+                    "running deterministic card review fallback"
+                )
                 card_review = await self._guardian.review_cards(proposal.card_set)
                 session.state["card_review"] = card_review.model_dump(mode="json")
                 try:
