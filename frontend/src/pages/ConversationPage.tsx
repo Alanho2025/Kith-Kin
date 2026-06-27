@@ -88,6 +88,7 @@ export function ConversationPage({ runtime, sessionId, isMock = false }: Convers
 
             <TwoLayerSubtitle
               partialEnglish={state.partialEnglish}
+              turns={state.turns}
               chineseSegments={state.chineseSegments}
             />
 

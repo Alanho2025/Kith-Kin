@@ -107,6 +107,7 @@ class TurnOrchestrator:
         self,
         event: TranscriptFinalEvent,
         context: TrustedRequestContext,
+        conversation_context: str | None = None,
     ) -> TurnOutcome:
         """Process the final transcript turn by executing the ADK orchestration graph.
 
@@ -171,22 +172,29 @@ class TurnOrchestrator:
         # The pharmacy_risk route is the router's risk trigger (dose, allergy,
         # interaction, medicine name, recall), so we retrieve the patient profile
         # only when it is actually relevant — not on every companion turn.
-        meds = []
-        allergies = []
+        meds: list[Any] = []
+        allergies: list[Any] = []
         if route.route_type is RouteType.PHARMACY_RISK:
             try:
                 profile_res = await mcp_adapter.memory_search("profile", ("profile",))
                 if profile_res.ok and profile_res.data:
                     for record in profile_res.data.records:
-                        content = record.value.get("content", {})
-                        if isinstance(content, str):
-                            try:
-                                content = json.loads(content)
-                            except json.JSONDecodeError:
-                                pass
-                        if isinstance(content, dict):
-                            meds.extend(content.get("medications", []))
-                            allergies.extend(content.get("allergies", []))
+                        val = record.value
+                        record_type = val.get("record_type")
+                        content = val.get("content")
+                        if record_type == "medication" and content:
+                            meds.append(content)
+                        elif record_type == "allergy" and content:
+                            allergies.append(content)
+                        else:
+                            if isinstance(content, str):
+                                try:
+                                    content = json.loads(content)
+                                except Exception:
+                                    pass
+                            if isinstance(content, dict):
+                                meds.extend(content.get("medications", []))
+                                allergies.extend(content.get("allergies", []))
             except Exception:
                 logger.warning("Failed to warm patient profile in turn orchestrator")
 
@@ -227,7 +235,12 @@ class TurnOrchestrator:
         # Load prompt instruction
         base_prompt = load_companion_prompt_template()
         companion_instruction = build_companion_instruction(
-            base_prompt, meds, allergies, prior_summary
+            base_prompt, meds, allergies, prior_summary, conversation_context
+        )
+        print(
+            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, "
+            f"prior: {prior_summary}",
+            flush=True,
         )
 
         # Bind tools
@@ -247,12 +260,16 @@ class TurnOrchestrator:
         if self._settings and self._settings.gemini_text_model:
             companion_agent.model = self._settings.gemini_text_model
 
+        # Clone router and guardian to prevent parent reuse validation errors
+        router_clone = self._router.clone()
+        guardian_clone = self._guardian.clone()
+
         # Build root orchestrator
         orchestrator_agent = OrchestratorAgent(
-            router=self._router,
-            guardian=self._guardian,
+            router=router_clone,
+            guardian=guardian_clone,
             companion=companion_agent,
-            sub_agents=[self._router, self._guardian, companion_agent],
+            sub_agents=[router_clone, guardian_clone, companion_agent],
         )
 
         user_id = str(context.user_id)
@@ -282,12 +299,16 @@ class TurnOrchestrator:
         ).message
 
         try:
-            async for _ in runner.run_async(
+            async for event_yielded in runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
                 new_message=new_message,
             ):
-                pass
+                print(
+                    f"[ADK EVENT] Author={event_yielded.author}, "
+                    f"Message={event_yielded.message}",
+                    flush=True,
+                )
         except Exception as e:
             logger.exception("ADK session execution failed")
             raise ValueError("COMPANION_UNAVAILABLE") from e
@@ -324,10 +345,25 @@ class TurnOrchestrator:
             if not proposal_data:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)
+            print(
+                "[PROPOSAL CARDS] "
+                f"{[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
+                flush=True,
+            )
 
             if not card_review_data:
-                raise ValueError("GUARDIAN_UNAVAILABLE")
-            card_review = GuardianDecision.model_validate(card_review_data)
+                logger.info(
+                    "card_review_data missing from session state; "
+                    "running deterministic card review fallback"
+                )
+                card_review = await self._guardian.review_cards(proposal.card_set)
+                session.state["card_review"] = card_review.model_dump(mode="json")
+                try:
+                    await session_service.update_session(session)
+                except Exception:
+                    pass
+            else:
+                card_review = GuardianDecision.model_validate(card_review_data)
 
             # Register card set if allowed
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
