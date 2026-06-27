@@ -154,24 +154,28 @@ class TurnOrchestrator:
         mcp_adapter = self._mcp_tool_adapter_factory(context)
         companion_any: Any = self._companion
 
-        # 2. Warm medications and allergies
+        # 2. Warm medications and allergies — only for medication-risk turns.
+        # The pharmacy_risk route is the router's risk trigger (dose, allergy,
+        # interaction, medicine name, recall), so we retrieve the patient profile
+        # only when it is actually relevant — not on every companion turn.
         meds = []
         allergies = []
-        try:
-            profile_res = await mcp_adapter.memory_search("profile", ("profile",))
-            if profile_res.ok and profile_res.data:
-                for record in profile_res.data.records:
-                    content = record.value.get("content", {})
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except json.JSONDecodeError:
-                            pass
-                    if isinstance(content, dict):
-                        meds.extend(content.get("medications", []))
-                        allergies.extend(content.get("allergies", []))
-        except Exception:
-            logger.warning("Failed to warm patient profile in turn orchestrator")
+        if route.route_type is RouteType.PHARMACY_RISK:
+            try:
+                profile_res = await mcp_adapter.memory_search("profile", ("profile",))
+                if profile_res.ok and profile_res.data:
+                    for record in profile_res.data.records:
+                        content = record.value.get("content", {})
+                        if isinstance(content, str):
+                            try:
+                                content = json.loads(content)
+                            except json.JSONDecodeError:
+                                pass
+                        if isinstance(content, dict):
+                            meds.extend(content.get("medications", []))
+                            allergies.extend(content.get("allergies", []))
+            except Exception:
+                logger.warning("Failed to warm patient profile in turn orchestrator")
 
         prior_summary = None
         if getattr(companion_any, "_session_service", None) is not None:
