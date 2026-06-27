@@ -32,10 +32,11 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     memory_repo = MemoryRepository(db_sessions, clock.now)
     notification_repo = NotificationRepository(db_sessions, clock.now)
     visit_repo = VisitRepository(db_sessions)
-    
+
     session_service = SessionService(session_store, clock.now, visit_repo)
-    
+
     session_events = []
+
     def get_session_events(sid: UUID):
         return session_events
 
@@ -44,24 +45,24 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
         notification_repository=notification_repo,
         get_session_events=get_session_events,
     )
-    
+
     confirmation_repository = InMemoryConfirmationRepository()
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
-    
+
     card_service = CardService(
         clock=clock.now,
         executor=completion_executor,
         repository=confirmation_repository,
     )
-    
+
     companion_agent = CompanionAgent(clock.now, session_service)
-    
+
     # 2. Start Visit 1
     session_1 = await session_service.create(user_id=TEST_USER_ID, encounter_type="pharmacy")
     context_1 = TrustedRequestContext(
         session_id=session_1.session_id, user_id=TEST_USER_ID, origin="test"
     )
-    
+
     # Feed the pharmacist transcript event
     prov_evt = first_visit_transcript[0]
     event_1 = TranscriptFinalEvent(
@@ -78,16 +79,16 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             language=prov_evt.language,
             text=prov_evt.text,
             revision=prov_evt.revision,
-        )
+        ),
     )
     session_events.append(event_1.model_dump(mode="json"))
-    
+
     # Compile summary draft
     draft_summary = await completion_service.prepare_summary(session_1.session_id, context_1)
     assert "coenzyme q10" in draft_summary.mentioned_drugs
     assert draft_summary.follow_up_needed is True
     assert draft_summary.family_notification_requested is True
-    
+
     # Register and confirm SAVE_MEMORY card
     card_set_id = f"cards_{uuid4()}"
     save_card = ResponseCard(
@@ -110,24 +111,24 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
         cards=(save_card,),
     )
     card_service.register_card_set(card_set, context_1)
-    
+
     selected = await card_service.select(
         CardSelectCommand(card_set_id=card_set_id, card_id=save_card.card_id, revision=1),
         context_1,
     )
-    
+
     # Confirming executes the memory write via the executor
     outcome = await card_service.confirm_selected(selected.confirmation_id, context_1)
     assert outcome.action_type == CardActionType.SAVE_MEMORY
-    
+
     # Verify it is written to the VisitSummary db table
     recent_visits = await visit_repo.recent_for_user(TEST_USER_ID)
     assert len(recent_visits) == 1
     assert "coenzyme q10" in recent_visits[0].value["mentioned_drugs"]
-    
+
     # 3. Start Visit 2
     session_2 = await session_service.create(user_id=TEST_USER_ID, encounter_type="pharmacy")
-    
+
     # Feed second visit transcript: parent asks for blood pressure medication
     prov_evt_2 = second_visit_transcript[0]
     event_2 = TranscriptFinalEvent(
@@ -144,20 +145,20 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             language=prov_evt_2.language,
             text=prov_evt_2.text,
             revision=prov_evt_2.revision,
-        )
+        ),
     )
-    
+
     # CompanionAgent should proactively propose a card suggesting to ask about Coenzyme Q10!
     route_decision = RouteDecision(
         route_type=RouteType.PHARMACY_RISK,
         confidence=0.9,
         reason_code=RouteReasonCode.PHARMACY_TERM,
     )
-    
+
     from unittest.mock import patch
 
     from google.adk.events import Event
-    
+
     async def mock_run_async(self_runner, user_id, session_id, new_message=None, **kwargs):
         from datetime import timedelta
         from uuid import uuid4
@@ -165,7 +166,7 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
         from app.core.constants import CardActionType, CardRiskLevel
         from app.schemas.agent_outputs import CardSetProposal
         from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
-        
+
         session = await self_runner.session_service.get_session(
             app_name=self_runner.app_name, user_id=user_id, session_id=session_id
         )
@@ -195,9 +196,9 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             ),
             proposal_hash="dummy_hash",
         )
-        real_session = self_runner.session_service.sessions[
-            self_runner.app_name
-        ][user_id][session_id]
+        real_session = self_runner.session_service.sessions[self_runner.app_name][user_id][
+            session_id
+        ]
         real_session.state["companion_proposal"] = proposal.model_dump()
         yield Event(author="Companion", message="Mock proposal cards")
 
@@ -205,7 +206,7 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
         proposal = await companion_agent.propose_cards(
             event_2, route_decision, f"guardian_{uuid4()}"
         )
-        
+
     assert len(proposal.card_set.cards) == 1
     card = proposal.card_set.cards[0]
     assert card.card_type == CardType.ASK_QUESTION

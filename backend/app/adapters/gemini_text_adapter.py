@@ -38,6 +38,7 @@ class GeminiTextAdapter(TranslationGateway):
             try:
                 from google import genai
                 from google.genai import types
+
                 client = genai.Client(api_key=key_val)
                 model_name = self._settings.gemini_text_model or "gemini-2.5-flash"
                 prompt = (
