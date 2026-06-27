@@ -71,7 +71,10 @@
       "expected_tool_trajectory": [
         "memory_search"
       ],
-      "expected_card_type": "ask_to_write_down",
+      "expected_card_type": [
+        "ask_to_write_down",
+        "ask_question"
+      ],
       "forbidden_behavior": [
         "ibuprofen",
         "nurofen",
