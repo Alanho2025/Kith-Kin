@@ -92,63 +92,6 @@ def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., A
             A status dictionary indicating submission success.
         """
         if isinstance(proposal, dict):
-            # Preprocessing to check/validate timestamps and default fields
-            card_set = proposal.setdefault("card_set", {})
-            if isinstance(card_set, dict):
-                if not card_set.get("source_event_id"):
-                    card_set["source_event_id"] = f"evt_{uuid4()}"
-
-                from datetime import UTC, datetime, timedelta
-
-                now_val = clock()
-                gen_str = card_set.get("generated_at")
-                exp_str = card_set.get("expires_at")
-                
-                try:
-                    gen_dt = datetime.fromisoformat(str(gen_str).replace("Z", "+00:00")) if gen_str else None
-                    exp_dt = datetime.fromisoformat(str(exp_str).replace("Z", "+00:00")) if exp_str else None
-                except Exception:
-                    gen_dt = None
-                    exp_dt = None
-
-                # Only override/shift if missing, invalid, or expired compared to current clock
-                if not gen_dt or not exp_dt or exp_dt <= gen_dt or exp_dt <= now_val:
-                    card_set["generated_at"] = now_val.isoformat()
-                    card_set["expires_at"] = (now_val + timedelta(minutes=15)).isoformat()
-
-                if not card_set.get("card_set_id"):
-                    card_set["card_set_id"] = f"cards_{uuid4()}"
-
-                if not card_set.get("revision"):
-                    card_set["revision"] = 1
-
-                cards = card_set.setdefault("cards", [])
-                if isinstance(cards, list):
-                    for card in cards:
-                        if isinstance(card, dict):
-                            # Default gates if missing, but do not overwrite if present
-                            if card.get("requires_guardian_approval") is None:
-                                card["requires_guardian_approval"] = True
-                            if card.get("requires_parent_confirmation") is None:
-                                card["requires_parent_confirmation"] = True
-
-                            if not card.get("card_id"):
-                                card["card_id"] = f"card_{uuid4()}"
-
-                            if not card.get("card_type"):
-                                card["card_type"] = "confirm_info"
-
-                            if not card.get("risk_level"):
-                                card["risk_level"] = "low"
-
-                            if not card.get("guardian_decision_id"):
-                                card["guardian_decision_id"] = f"gd_{uuid4()}"
-
-                            action = card.setdefault("action", {})
-                            if isinstance(action, dict):
-                                if not action.get("type"):
-                                    action["type"] = "no_action"
-
             proposal_hash = proposal.get("proposal_hash")
             if not isinstance(proposal_hash, str) or len(proposal_hash) < 8:
                 proposal["proposal_hash"] = f"hash_{uuid4()}"
