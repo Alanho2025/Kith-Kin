@@ -4,7 +4,7 @@ import json
 from enum import StrEnum
 from typing import Annotated, Any, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.constants import CardRiskLevel, GuardianDecisionType
 from app.schemas.cards import CardSet
@@ -69,19 +69,10 @@ class GuardianDecision(BaseModel):
 class CardSetProposal(BaseModel):
     """Companion card proposal before Guardian review."""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     card_set: CardSet
     proposal_hash: Annotated[str, Field(min_length=8, max_length=128)]
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_proposal_fields(cls, data: "Any") -> "Any":
-        if isinstance(data, dict):
-            h_val = data.get("proposal_hash")
-            if not h_val or not isinstance(h_val, str) or len(h_val) < 8:
-                data["proposal_hash"] = "default_proposal_hash_value"
-        return data
 
 
 TModel = TypeVar("TModel", bound=BaseModel)

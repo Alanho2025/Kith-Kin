@@ -112,6 +112,7 @@ def build_companion_instruction(
     meds: list[str],
     allergies: list[str],
     prior_summary: str | None,
+    conversation_context: str | None = None,
 ) -> str:
     """Assemble the system instruction including pre-fetched patient context.
 
@@ -127,12 +128,17 @@ def build_companion_instruction(
     meds_str = ", ".join(meds) if meds else "None"
     allergies_str = ", ".join(allergies) if allergies else "None"
     recall_section = f"\nPrior Visit Summary: {prior_summary}" if prior_summary else ""
+    conversation_section = (
+        f"\nRecent Session Conversation:\n{conversation_context}"
+        if conversation_context
+        else ""
+    )
 
     return f"""{base_prompt}
 
 Patient Profile:
 - Current Medications: {meds_str}
-- Allergies: {allergies_str}{recall_section}
+- Allergies: {allergies_str}{recall_section}{conversation_section}
 
 Core Rules:
 1. You must check for drug interactions using check_drug_interaction when a drug is mentioned.
@@ -146,7 +152,9 @@ Core Rules:
 4. You must propose response cards by calling submit_response_cards tool.
    Propose them in Chinese (zh_text) and English (en_text) matching
    the CardSetProposal contract structure.
-5. You MUST NOT respond with free-form text. You MUST respond ONLY by calling the submit_response_cards tool to submit cards. Conversational text responses are strictly forbidden.
+5. You MUST NOT respond with free-form text. You MUST respond ONLY by calling
+   the submit_response_cards tool to submit cards. Conversational text
+   responses are strictly forbidden.
 """
 
 
@@ -332,7 +340,7 @@ class CompanionAgent(Agent):
             elif "listen to pro" in text_lower or "lisinopril" in text_lower:
                 mock_card = ResponseCard(
                     card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_QUESTION,
+                    card_type=CardType.ASK_TO_WRITE_DOWN,
                     zh_text="请药剂师写下药品名",
                     en_text="Ask pharmacist to write down the drug name",
                     risk_level=CardRiskLevel.NORMAL,

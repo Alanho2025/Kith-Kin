@@ -279,6 +279,76 @@ async def test_chinese_provider_transcript_still_reaches_turn_orchestrator(
 
 
 @pytest.mark.anyio
+async def test_turn_orchestrator_receives_recent_session_context(
+    live_app_client: TestClient,
+) -> None:
+    service = live_app_client.app.state.live_runtime_service
+    session_id = UUID(create_session(live_app_client))
+    service._turn_orchestrator.process_final_turn = AsyncMock(
+        return_value=TurnOutcome(
+            route=RouteDecision(
+                route_type=RouteType.PASSIVE_TRANSLATION,
+                confidence=0.9,
+                reason_code=RouteReasonCode.ROUTINE_TRANSLATION,
+            ),
+            guardian=GuardianDecision(
+                guardian_decision_id="guardian-context",
+                decision=GuardianDecisionType.ALLOW,
+                risk_level=CardRiskLevel.NORMAL,
+                reason_code=GuardianReasonCode.SAFE_TURN,
+            ),
+            card_proposal=None,
+            card_review=None,
+        )
+    )
+
+    service._append_event(
+        session_id,
+        "transcript.final",
+        {
+            "utterance_id": "utt-prev",
+            "speaker": "pharmacist",
+            "language": "en",
+            "text": "Do you have allergies?",
+            "revision": 1,
+        },
+    )
+    service._append_event(
+        session_id,
+        "translation.final",
+        {
+            "source_transcript_event_id": "evt-prev",
+            "segment_id": "seg-prev",
+            "source_language": "en",
+            "target_language": "zh_cn",
+            "translated_text": "你有过敏吗？",
+            "mode": "faithful",
+            "append_only": True,
+            "latency_ms": 20,
+        },
+    )
+
+    await service._handle_transcript_provider_event(
+        session_id,
+        ProviderTranscriptEvent(
+            event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+            provider_event_id="provider-context",
+            utterance_id="utt-current",
+            speaker="pharmacist",
+            language="en",
+            text="Please tell me which medicine you take.",
+            revision=1,
+        ),
+    )
+
+    call = service._turn_orchestrator.process_final_turn.await_args
+    context_text = call.kwargs["conversation_context"]
+    assert "Do you have allergies?" in context_text
+    assert "你有过敏吗？" in context_text
+    assert "Please tell me which medicine you take." in context_text
+
+
+@pytest.mark.anyio
 async def test_card_confirmation_is_the_only_path_that_requests_english_audio(
     live_app_client: TestClient,
 ) -> None:
