@@ -82,55 +82,67 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             BackstopRisk.PRIVACY,
             BackstopReason.IDENTITY_REQUEST,
         )
-    if any(marker in lowered for marker in (
-        "save the summary",
-        "save this",
-        "send this to my daughter",
-        "send this to my son",
-        "send this to my family",
-        "notify family",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "save the summary",
+            "save this",
+            "send this to my daughter",
+            "send this to my son",
+            "send this to my family",
+            "notify family",
+        )
+    ):
         return (
             SafetyBackstopResult.REQUIRE_CONFIRMATION,
             BackstopRisk.MEDICAL,
             BackstopReason.MEDICAL_ADVICE,
         )
-    if any(marker in lowered for marker in (
-        "credit card",
-        "card number",
-        "cvv",
-        "bsb",
-        "bank account",
-        "account number",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "credit card",
+            "card number",
+            "cvv",
+            "bsb",
+            "bank account",
+            "account number",
+        )
+    ):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
             BackstopReason.PAYMENT_REQUEST,
         )
-    if any(marker in lowered for marker in (
-        "passport",
-        "medicare",
-        "driver licence",
-        "driver's licence",
-        "drivers licence",
-        "driver license",
-        "driver's license",
-        "drivers license",
-        "driving licence",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "passport",
+            "medicare",
+            "driver licence",
+            "driver's licence",
+            "drivers licence",
+            "driver license",
+            "driver's license",
+            "drivers license",
+            "driving licence",
+        )
+    ):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
             BackstopReason.IDENTITY_REQUEST,
         )
-    if any(marker in lowered for marker in (
-        "home address",
-        "where do you live",
-        "street address",
-        "residential address",
-        "your address",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "home address",
+            "where do you live",
+            "street address",
+            "residential address",
+            "your address",
+        )
+    ):
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,

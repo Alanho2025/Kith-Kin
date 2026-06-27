@@ -34,16 +34,14 @@ from app.services.turn_orchestrator import TurnOrchestrator
 logger = logging.getLogger(__name__)
 
 LIVE_UNAVAILABLE_ZH = (
-    "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5"
-    "\u5b9e\u65f6\u8bed\u97f3\u670d\u52a1\u3002"
+    "\u6682\u65f6\u65e0\u6cd5\u8fde\u63a5\u5b9e\u65f6\u8bed\u97f3\u670d\u52a1\u3002"
 )
 TRANSLATION_UNAVAILABLE_ZH = (
     "\u6682\u65f6\u65e0\u6cd5\u751f\u6210\u4e2d\u6587\u7ffb\u8bd1\uff0c"
     "\u82f1\u6587\u539f\u6587\u4ecd\u4fdd\u7559\u3002"
 )
 TRANSLATION_UNAVAILABLE_EN = (
-    "Translation is temporarily unavailable; "
-    "the English transcript remains visible."
+    "Translation is temporarily unavailable; the English transcript remains visible."
 )
 
 
@@ -107,11 +105,11 @@ class LiveRuntimeService:
             await websocket.send_json(fallback)
             await websocket.close(code=1012, reason="SESSION_RESUME_UNAVAILABLE")
             return
-        events = buffer if last_seen_sequence is None else [
-            event
-            for event in buffer
-            if self._sequence(event) > last_seen_sequence
-        ]
+        events = (
+            buffer
+            if last_seen_sequence is None
+            else [event for event in buffer if self._sequence(event) > last_seen_sequence]
+        )
         for event in events:
             await websocket.send_json(event)
 
@@ -190,6 +188,7 @@ class LiveRuntimeService:
             return
         if isinstance(event, TranscriptFinalEvent):
             from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
+
             provider_event = ProviderTranscriptEvent(
                 event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
                 provider_event_id=event.event_id,
@@ -354,8 +353,7 @@ class LiveRuntimeService:
                         "code": "COMPANION_UNAVAILABLE",
                         "message_zh": "暂时无法生成回应卡片，翻译仍在继续。",
                         "message_en": (
-                            "Response cards are temporarily unavailable; "
-                            "translation continues."
+                            "Response cards are temporarily unavailable; translation continues."
                         ),
                         "retryable": True,
                         "recovery_action": "return_to_listening",

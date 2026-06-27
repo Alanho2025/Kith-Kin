@@ -58,6 +58,7 @@ def create_app(
         and resolved_settings.google_api_key.get_secret_value()
     ):
         import os
+
         os.environ["GOOGLE_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
         os.environ["GEMINI_API_KEY"] = resolved_settings.google_api_key.get_secret_value()
     database_url = (
@@ -107,7 +108,7 @@ def create_app(
     )
 
     confirmation_repository = InMemoryConfirmationRepository()
-    
+
     live_runtime_service: LiveRuntimeService | None = None
 
     def get_session_events(sid: UUID) -> list[dict[str, Any]]:
@@ -130,6 +131,7 @@ def create_app(
     router_agent = RouterAgent()
     guardian_agent = GuardianAgent()
     companion_agent = CompanionAgent(clock, session_service)
+
     def mcp_tool_adapter_factory(context: TrustedRequestContext) -> McpToolAdapter:
         return McpToolAdapter(
             settings=resolved_settings,

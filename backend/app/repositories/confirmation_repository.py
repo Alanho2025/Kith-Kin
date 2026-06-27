@@ -28,6 +28,7 @@ class InMemoryConfirmationRepository:
     def find_pending_by_session(self, session_id: UUID) -> list[StoredConfirmation]:
         with self._lock:
             return [
-                record for record in self._records.values()
+                record
+                for record in self._records.values()
                 if record.session_id == session_id and record.state == "pending"
             ]

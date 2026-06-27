@@ -26,6 +26,7 @@ def app_client(clock: MutableClock) -> Iterator[TestClient]:
         cors_allowed_origins=[ORIGIN],
         app_ws_token_secret=TEST_SIGNING_KEY,
         app_ws_cookie_secure=False,
+        live_transport="backend_proxy",
     )
     with TestClient(create_app(settings=settings, user_id=TEST_USER_ID, clock=clock.now)) as client:
         yield client

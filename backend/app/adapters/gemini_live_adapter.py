@@ -44,6 +44,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
             return
         try:
             from google.genai import types
+
             await self._session.send_realtime_input(
                 media=types.Blob(data=frame, mime_type="audio/pcm;rate=16000")
             )
@@ -65,6 +66,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
             return
         try:
             from google.genai import types
+
             await self._session.send_client_content(
                 turns=types.Content(role="user", parts=[types.Part(text=text)]),
                 turn_complete=True,
@@ -79,6 +81,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 if event is None:
                     break
                 yield event
+
         return event_generator()
 
     async def close(self) -> None:
@@ -166,7 +169,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
         # 2. Check for server content (transcriptions and audio)
         if msg.server_content:
             content = msg.server_content
-            
+
             # English input transcript (pharmacist speaking)
             if content.input_transcription:
                 text = content.input_transcription.text or ""
@@ -185,7 +188,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 }
                 transcript_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                 await self._queue.put(transcript_event)
-                
+
                 if finished:
                     self._current_utterance_id = f"utt_{uuid4()}"
                     self._current_transcript_text = ""
@@ -202,6 +205,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                         audio_data = part.inline_data.data
                         if audio_data:
                             import base64
+
                             encoded = base64.b64encode(audio_data).decode("utf-8")
                             flat_msg = {
                                 "type": "audio",
@@ -224,6 +228,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 turn_complete_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                 await self._queue.put(turn_complete_event)
 
+
 class GeminiLiveAdapter(GeminiLiveGateway):
     """Open and normalise a single Gemini Live session.
 
@@ -244,7 +249,7 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             from google.genai import types
 
             client = genai.Client(api_key=key_val)
-            
+
             # Configure LiveConnectConfig
             config = types.LiveConnectConfig(
                 response_modalities=["AUDIO"],
@@ -258,15 +263,14 @@ class GeminiLiveAdapter(GeminiLiveGateway):
                     )
                 ),
             )
-            
+
             # Connect using gemini-3.5-live-translate-preview
             model_name = (
-                self._settings.gemini_live_translate_model
-                or "gemini-3.5-live-translate-preview"
+                self._settings.gemini_live_translate_model or "gemini-3.5-live-translate-preview"
             )
             ctx = client.aio.live.connect(model=model_name, config=config)
             session = await ctx.__aenter__()
-            
+
             return GeminiLiveSessionPort(ctx, session)
         except Exception as e:
             logger.exception("Failed to connect to Gemini Live session")

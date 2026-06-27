@@ -20,11 +20,9 @@ def test_runtime_rejects_arbitrary_confirm_but_http_recovery_remains_legacy(
     from app.services.card_service import _action_hash
     from tests.fixtures.clock import MutableClock
     from tests.unit.services.test_card_service import approved_card_set
-    
+
     context = TrustedRequestContext(
-        session_id=UUID(session_id),
-        user_id=app_client.app.state.user_id,
-        origin="test"
+        session_id=UUID(session_id), user_id=app_client.app.state.user_id, origin="test"
     )
     card_set = approved_card_set(MutableClock())
     app_client.app.state.card_service.register_card_set(card_set, context)

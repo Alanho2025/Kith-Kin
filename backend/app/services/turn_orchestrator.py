@@ -33,11 +33,20 @@ logger = logging.getLogger(__name__)
 # than relying on the companion LLM to remember to call the tool. Safety backstop.
 INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
     {
-        "ibuprofen", "diclofenac", "naproxen", "aspirin",
+        "ibuprofen",
+        "diclofenac",
+        "naproxen",
+        "aspirin",
         "warfarin",
-        "lisinopril", "perindopril", "ramipril",
-        "candesartan", "telmisartan", "irbesartan",
-        "amlodipine", "atorvastatin", "rosuvastatin",
+        "lisinopril",
+        "perindopril",
+        "ramipril",
+        "candesartan",
+        "telmisartan",
+        "irbesartan",
+        "amlodipine",
+        "atorvastatin",
+        "rosuvastatin",
     }
 )
 
@@ -216,9 +225,7 @@ class TurnOrchestrator:
         if getattr(companion_any, "_session_service", None) is not None:
             try:
                 sid = UUID(str(event.session_id))
-                cached = getattr(
-                    companion_any._session_service, "prefetch_cache", {}
-                ).get(sid, [])
+                cached = getattr(companion_any._session_service, "prefetch_cache", {}).get(sid, [])
                 for val in cached:
                     advice = val.get("pharmacist_advice_summary", "")
                     unresolved = val.get("unresolved_questions", [])

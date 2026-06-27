@@ -59,8 +59,9 @@ class DrugKnowledgeRepository:
             relevant = False
             for keyword_a in _class_keywords(class_a):
                 for keyword_b in _class_keywords(class_b):
-                    if (keyword_a in mech_lower or keyword_a in rec_lower) and \
-                       (keyword_b in mech_lower or keyword_b in rec_lower):
+                    if (keyword_a in mech_lower or keyword_a in rec_lower) and (
+                        keyword_b in mech_lower or keyword_b in rec_lower
+                    ):
                         relevant = True
                         break
                 if relevant:
@@ -83,53 +84,76 @@ def _class_keywords(drug_class: str) -> list[str]:
     keywords = [drug_class.lower()]
     synonyms = {
         "ACE Inhibitor": [
-            "ace inhibitor", "ace inhibitors", "perindopril", "ramipril", "lisinopril"
+            "ace inhibitor",
+            "ace inhibitors",
+            "perindopril",
+            "ramipril",
+            "lisinopril",
         ],
         "Angiotensin II Receptor Blocker (ARB)": [
-            "arb", "angiotensin", "candesartan", "telmisartan", "irbesartan"
+            "arb",
+            "angiotensin",
+            "candesartan",
+            "telmisartan",
+            "irbesartan",
         ],
-        "Calcium Channel Blocker (Dihydropyridine)": [
-            "calcium channel blocker", "amlodipine"
-        ],
+        "Calcium Channel Blocker (Dihydropyridine)": ["calcium channel blocker", "amlodipine"],
         "Statin (HMG-CoA Reductase Inhibitor)": [
-            "statin", "statins", "atorvastatin", "rosuvastatin"
+            "statin",
+            "statins",
+            "atorvastatin",
+            "rosuvastatin",
         ],
-        "NSAID": [
-            "nsaid", "nsaids", "anti-inflammatory", "ibuprofen", "diclofenac", "naproxen"
-        ],
-        "Antiplatelet (low dose 100mg)": [
-            "aspirin", "antiplatelet"
-        ],
-        "Vitamin K Antagonist (Anticoagulant)": [
-            "warfarin", "anticoagulant", "anticoagulants"
-        ],
+        "NSAID": ["nsaid", "nsaids", "anti-inflammatory", "ibuprofen", "diclofenac", "naproxen"],
+        "Antiplatelet (low dose 100mg)": ["aspirin", "antiplatelet"],
+        "Vitamin K Antagonist (Anticoagulant)": ["warfarin", "anticoagulant", "anticoagulants"],
         "Direct Oral Anticoagulant (Factor Xa Inhibitor)": [
-            "anticoagulant", "anticoagulants", "apixaban", "rivaroxaban", "eliquis", "xarelto"
+            "anticoagulant",
+            "anticoagulants",
+            "apixaban",
+            "rivaroxaban",
+            "eliquis",
+            "xarelto",
         ],
         "SSRI Antidepressant": [
-            "ssri", "antidepressant", "sertraline", "escitalopram", "zoloft", "lexapro"
+            "ssri",
+            "antidepressant",
+            "sertraline",
+            "escitalopram",
+            "zoloft",
+            "lexapro",
         ],
-        "Biguanide": [
-            "metformin", "diabetes"
-        ],
-        "Proton Pump Inhibitor (PPI)": [
-            "ppi", "pantoprazole", "esomeprazole", "omeprazole"
-        ],
+        "Biguanide": ["metformin", "diabetes"],
+        "Proton Pump Inhibitor (PPI)": ["ppi", "pantoprazole", "esomeprazole", "omeprazole"],
         "Decongestant (sympathomimetic)": [
-            "decongestant", "pseudoephedrine", "phenylephrine", "sudafed", "codral"
+            "decongestant",
+            "pseudoephedrine",
+            "phenylephrine",
+            "sudafed",
+            "codral",
         ],
         # Substance classes
         "CYP3A4 Inhibitor (Dietary)": [
-            "grapefruit", "grapefruit juice", "cyp3a4", "seville oranges"
+            "grapefruit",
+            "grapefruit juice",
+            "cyp3a4",
+            "seville oranges",
         ],
         "CNS Depressant / Hepatotoxin (Dietary)": [
-            "alcohol", "beer", "wine", "spirits", "ethanol", "lactic acidosis"
+            "alcohol",
+            "beer",
+            "wine",
+            "spirits",
+            "ethanol",
+            "lactic acidosis",
         ],
-        "CYP2C9 / OATP Inhibitor (Dietary)": [
-            "cranberry", "cranberry juice", "cyp2c9", "warfarin"
-        ],
+        "CYP2C9 / OATP Inhibitor (Dietary)": ["cranberry", "cranberry juice", "cyp2c9", "warfarin"],
         "CYP3A4 / P-glycoprotein Inducer (Herbal)": [
-            "st john", "st. john", "hypericum", "cyp3a4", "p-glycoprotein"
+            "st john",
+            "st. john",
+            "hypericum",
+            "cyp3a4",
+            "p-glycoprotein",
         ],
     }
     for cls, syns in synonyms.items():

@@ -20,13 +20,13 @@ async def confirm_card(
     record = cards._repository.get(body.confirmation_id)
     if not record:
         raise CardConfirmationError("CARD_NOT_FOUND")
-    
+
     context = TrustedRequestContext(
         session_id=record.session_id,
         user_id=request.app.state.user_id,
         origin="http_recovery",
     )
-    
+
     result = await cards.confirm_selected(body.confirmation_id, context)
     return CardConfirmRecoveryResponse(
         confirmation_id=result.confirmation_id,
