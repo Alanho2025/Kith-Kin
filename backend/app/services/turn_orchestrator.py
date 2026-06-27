@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -252,7 +252,7 @@ class TurnOrchestrator:
         )
 
         # Bind tools
-        submit_clock = self._clock or (lambda: datetime.now(timezone.utc))
+        submit_clock = self._clock or (lambda: datetime.now(UTC))
 
         tools = [
             make_memory_search(mcp_adapter),

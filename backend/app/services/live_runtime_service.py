@@ -48,9 +48,15 @@ TRANSLATION_UNAVAILABLE_EN = (
 def _get_chinese_advice(en_text: str) -> str:
     lower = en_text.lower()
     if "nurofen" in lower or "ibuprofen" in lower:
-        return "药剂师建议不要服用 Nurofen (布洛芬)，因为这与降血压药 Perindopril (培哚普利) 存在药物相互作用，有肾脏风险。建议使用 Panadol 代替。"
+        return (
+            "药剂师建议不要服用 Nurofen (布洛芬)，因为这与降血压药 Perindopril (培哚普利) "
+            "存在药物相互作用，有肾脏风险。建议使用 Panadol 代替。"
+        )
     if "voltaren" in lower or "diclofenac" in lower:
-        return "药剂师警告说 Voltaren (双氯芬酸) 与 Warfarin (华法林) 同服会使出血风险翻倍。强烈建议使用 Panadol 代替。"
+        return (
+            "药剂师警告说 Voltaren (双氯芬酸) 与 Warfarin (华法林) 同服会使出血风险翻倍。"
+            "强烈建议使用 Panadol 代替。"
+        )
     if "codral" in lower or "pseudoephedrine" in lower:
         return "药剂师警告说 Codral (伪麻黄碱) 会升高血压。建议使用生理盐水鼻喷雾剂。"
     if "grapefruit" in lower:
@@ -239,7 +245,12 @@ class LiveRuntimeService:
                 await websocket.send_json(provider_outcome)
             return
         if self._command_service is not None:
-            from app.schemas.runtime_events import PleaseWaitEvent, SelfSpeakEvent, RepeatEvent, SessionEndEvent
+            from app.schemas.runtime_events import (
+                PleaseWaitEvent,
+                RepeatEvent,
+                SelfSpeakEvent,
+                SessionEndEvent,
+            )
 
             if isinstance(event, PleaseWaitEvent):
                 self._paused_sessions.add(session_id)
@@ -266,11 +277,15 @@ class LiveRuntimeService:
                     origin="runtime",
                 )
                 try:
-                    summary_review = await self._completion_service.prepare_summary(session_id, context)
+                    summary_review = await self._completion_service.prepare_summary(
+                        session_id, context
+                    )
                     advice_zh = _get_chinese_advice(summary_review.pharmacist_advice_summary)
-                    questions_zh = [_get_chinese_question(q) for q in summary_review.unresolved_questions]
+                    questions_zh = [
+                        _get_chinese_question(q) for q in summary_review.unresolved_questions
+                    ]
                     
-                    summary_payload = {
+                    summary_payload: dict[str, object] = {
                         "summary_id": f"sum-{uuid4()}",
                         "summary": {
                             "title_zh": "今天药局沟通重点",
@@ -805,7 +820,12 @@ class LiveRuntimeService:
             return
 
         if self._command_service is not None and not isinstance(event, CardConfirmEvent):
-            from app.schemas.runtime_events import PleaseWaitEvent, SelfSpeakEvent, RepeatEvent, SessionEndEvent
+            from app.schemas.runtime_events import (
+                PleaseWaitEvent,
+                RepeatEvent,
+                SelfSpeakEvent,
+                SessionEndEvent,
+            )
 
             if isinstance(event, PleaseWaitEvent):
                 self._paused_sessions.add(session_id)
@@ -849,11 +869,15 @@ class LiveRuntimeService:
                     origin="runtime",
                 )
                 try:
-                    summary_review = await self._completion_service.prepare_summary(session_id, context)
+                    summary_review = await self._completion_service.prepare_summary(
+                        session_id, context
+                    )
                     advice_zh = _get_chinese_advice(summary_review.pharmacist_advice_summary)
-                    questions_zh = [_get_chinese_question(q) for q in summary_review.unresolved_questions]
+                    questions_zh = [
+                        _get_chinese_question(q) for q in summary_review.unresolved_questions
+                    ]
                     
-                    summary_payload = {
+                    summary_payload: dict[str, object] = {
                         "summary_id": f"sum-{uuid4()}",
                         "summary": {
                             "title_zh": "今天药局沟通重点",
