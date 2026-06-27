@@ -13,6 +13,7 @@ import type {
 export const initialConversationState: ConversationState = {
   status: "idle",
   partialEnglish: "",
+  turns: [],
   chineseSegments: [],
   activeCardSet: null,
   confirmation: null,
@@ -56,10 +57,27 @@ export function conversationReducer(
     }
     case "transcript.partial":
     case "transcript.final": {
-      const payload = event.payload as { text: string };
+      const payload = event.payload as {
+        utteranceId?: string;
+        speaker?: "parent" | "pharmacist" | "unknown";
+        text: string;
+      };
+      const turns = event.eventType === "transcript.final"
+        ? [
+            ...state.turns,
+            {
+              utteranceId: payload.utteranceId ?? event.eventId,
+              transcriptEventId: event.eventId,
+              speaker: payload.speaker ?? "unknown",
+              sourceText: payload.text,
+              translatedText: null,
+            },
+          ]
+        : state.turns;
       return recordEvent(state, event, {
         status: event.eventType === "transcript.partial" ? "transcribing" : "translating",
         partialEnglish: payload.text,
+        turns,
       });
     }
     case "translation.pending":
@@ -69,8 +87,14 @@ export function conversationReducer(
       const exists = state.chineseSegments.some(
         (segment) => segment.segmentId === payload.segmentId,
       );
+      const turns = state.turns.map((turn) =>
+        turn.transcriptEventId === payload.sourceTranscriptEventId
+          ? { ...turn, translatedText: payload.translatedText }
+          : turn,
+      );
       return recordEvent(state, event, {
         status: "listening",
+        turns,
         chineseSegments: exists ? state.chineseSegments : [...state.chineseSegments, payload],
       });
     }

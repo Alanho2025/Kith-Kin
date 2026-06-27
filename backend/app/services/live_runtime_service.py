@@ -339,6 +339,7 @@ class LiveRuntimeService:
                 TrustedRequestContext(
                     session_id=session_id, user_id=self._user_id, origin="runtime"
                 ),
+                conversation_context=self._recent_conversation_context(session_id),
             )
         except Exception:
             # Agent/card track is best-effort: never let it discard the
@@ -437,6 +438,23 @@ class LiveRuntimeService:
         if len(buffer) > self.MAX_BUFFERED_EVENTS:
             del buffer[: -self.MAX_BUFFERED_EVENTS]
         return event
+
+    def _recent_conversation_context(self, session_id: UUID, limit: int = 6) -> str | None:
+        lines: list[str] = []
+        for event in self._buffers.get(session_id, []):
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if event.get("event_type") == "transcript.final":
+                text = payload.get("text")
+                if isinstance(text, str) and text.strip():
+                    lines.append(f"Pharmacist: {text.strip()}")
+            elif event.get("event_type") == "translation.final":
+                text = payload.get("translated_text")
+                if isinstance(text, str) and text.strip():
+                    lines.append(f"Chinese translation: {text.strip()}")
+        recent = lines[-limit:]
+        return "\n".join(recent) if recent else None
 
     def _event(
         self,

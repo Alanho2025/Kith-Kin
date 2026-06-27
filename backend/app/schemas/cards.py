@@ -31,7 +31,7 @@ class CardAction(BaseModel):
 class ResponseCard(BaseModel):
     """Guardian-approved response card rendered by the client."""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     card_id: Annotated[str, Field(min_length=1, max_length=80)]
     card_type: CardType
@@ -42,25 +42,6 @@ class ResponseCard(BaseModel):
     requires_parent_confirmation: bool
     requires_guardian_approval: bool
     guardian_decision_id: Annotated[str, Field(min_length=1, max_length=80)]
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_card_fields(cls, data: "Any") -> "Any":
-        if isinstance(data, dict):
-            from uuid import uuid4
-            if not data.get("card_id"):
-                data["card_id"] = f"card_{uuid4()}"
-            if not data.get("card_type"):
-                data["card_type"] = "ask_question"
-            if not data.get("risk_level"):
-                data["risk_level"] = "normal"
-            if not data.get("action"):
-                data["action"] = {"type": "no_action"}
-            data["requires_parent_confirmation"] = True
-            data["requires_guardian_approval"] = True
-            if not data.get("guardian_decision_id"):
-                data["guardian_decision_id"] = "default_guardian_id"
-        return data
 
     @model_validator(mode="after")
     def validate_confirmation_gates(self) -> "ResponseCard":
@@ -78,7 +59,7 @@ class ResponseCard(BaseModel):
 class CardSet(BaseModel):
     """One current revision of one to three approved cards."""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     card_set_id: Annotated[str, Field(min_length=1, max_length=80)]
     revision: Annotated[int, Field(ge=1)]
@@ -86,24 +67,6 @@ class CardSet(BaseModel):
     generated_at: datetime
     expires_at: datetime
     cards: Annotated[tuple[ResponseCard, ...], Field(min_length=1, max_length=3)]
-
-    @model_validator(mode="before")
-    @classmethod
-    def sanitize_set_fields(cls, data: "Any") -> "Any":
-        if isinstance(data, dict):
-            from uuid import uuid4
-            from datetime import datetime, UTC, timedelta
-            if not data.get("card_set_id"):
-                data["card_set_id"] = f"cards_{uuid4()}"
-            if "revision" not in data:
-                data["revision"] = 1
-            if not data.get("source_event_id"):
-                data["source_event_id"] = "evt_source"
-            
-            now = datetime.now(UTC)
-            data["generated_at"] = now.isoformat().replace("+00:00", "Z")
-            data["expires_at"] = (now + timedelta(minutes=3)).isoformat().replace("+00:00", "Z")
-        return data
 
     @model_validator(mode="after")
     def validate_expiry(self) -> "CardSet":
