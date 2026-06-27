@@ -146,6 +146,7 @@ Core Rules:
 4. You must propose response cards by calling submit_response_cards tool.
    Propose them in Chinese (zh_text) and English (en_text) matching
    the CardSetProposal contract structure.
+5. You MUST NOT respond with free-form text. You MUST respond ONLY by calling the submit_response_cards tool to submit cards. Conversational text responses are strictly forbidden.
 """
 
 
@@ -202,15 +203,22 @@ class CompanionAgent(Agent):
             profile_res = await mcp_adapter.memory_search("profile", ("profile",))
             if profile_res.ok and profile_res.data:
                 for record in profile_res.data.records:
-                    content = record.value.get("content", {})
-                    if isinstance(content, str):
-                        try:
-                            content = json.loads(content)
-                        except json.JSONDecodeError:
-                            pass
-                    if isinstance(content, dict):
-                        meds.extend(content.get("medications", []))
-                        allergies.extend(content.get("allergies", []))
+                    val = record.value
+                    record_type = val.get("record_type")
+                    content = val.get("content")
+                    if record_type == "medication" and content:
+                        meds.append(content)
+                    elif record_type == "allergy" and content:
+                        allergies.append(content)
+                    else:
+                        if isinstance(content, str):
+                            try:
+                                content = json.loads(content)
+                            except Exception:
+                                pass
+                        if isinstance(content, dict):
+                            meds.extend(content.get("medications", []))
+                            allergies.extend(content.get("allergies", []))
 
         prior_summary = None
         if self._session_service is not None:
