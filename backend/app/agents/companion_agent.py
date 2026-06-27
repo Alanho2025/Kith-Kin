@@ -98,15 +98,23 @@ def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., A
                 if not card_set.get("source_event_id"):
                     card_set["source_event_id"] = f"evt_{uuid4()}"
 
-                from datetime import UTC, datetime, timedelta
+                from datetime import datetime, timedelta
 
                 now_val = clock()
                 gen_str = card_set.get("generated_at")
                 exp_str = card_set.get("expires_at")
                 
                 try:
-                    gen_dt = datetime.fromisoformat(str(gen_str).replace("Z", "+00:00")) if gen_str else None
-                    exp_dt = datetime.fromisoformat(str(exp_str).replace("Z", "+00:00")) if exp_str else None
+                    gen_dt = (
+                        datetime.fromisoformat(str(gen_str).replace("Z", "+00:00"))
+                        if gen_str
+                        else None
+                    )
+                    exp_dt = (
+                        datetime.fromisoformat(str(exp_str).replace("Z", "+00:00"))
+                        if exp_str
+                        else None
+                    )
                 except Exception:
                     gen_dt = None
                     exp_dt = None
