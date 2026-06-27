@@ -285,10 +285,18 @@ async def _eval_turn(case: dict[str, Any]) -> dict[str, Any]:
             expected_card_type = case.get("expected_card_type")
             if expected_card_type is not None:
                 observed_card_type = outcome.card_proposal.card_set.cards[0].card_type.value
+                # expected_card_type may be a single value or a list of acceptable
+                # types (the companion's clarification card type is LLM-chosen and
+                # more than one type can correctly serve the intent).
+                acceptable = (
+                    expected_card_type
+                    if isinstance(expected_card_type, list)
+                    else [expected_card_type]
+                )
                 extra.append(
                     {
                         "name": "card_type",
-                        "passed": observed_card_type == expected_card_type,
+                        "passed": observed_card_type in acceptable,
                         "expected": expected_card_type,
                         "observed": observed_card_type,
                     }
