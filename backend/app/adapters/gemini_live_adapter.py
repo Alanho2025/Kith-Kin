@@ -210,7 +210,19 @@ class GeminiLiveSessionPort(LiveSessionPort):
                             }
                             audio_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                             await self._queue.put(audio_event)
-
+            if content.turn_complete:
+                flat_msg = {
+                    "type": "input_transcription",
+                    "event_id": f"evt_{uuid4()}",
+                    "utterance_id": "turn_complete",
+                    "speaker": "pharmacist",
+                    "language": "en",
+                    "text": "",
+                    "revision": 1,
+                    "final": True,
+                }
+                turn_complete_event = GeminiLiveAdapter.map_provider_message(flat_msg)
+                await self._queue.put(turn_complete_event)
 
 class GeminiLiveAdapter(GeminiLiveGateway):
     """Open and normalise a single Gemini Live session.
