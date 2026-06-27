@@ -1,18 +1,15 @@
 import type {
-  ConversationTurnView,
   TranslationSegmentView,
 } from "../features/conversation/viewModels";
 
 
 interface TwoLayerSubtitleProps {
   partialEnglish: string;
-  turns: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
 }
 
 export function TwoLayerSubtitle({
   partialEnglish,
-  turns,
   chineseSegments,
 }: TwoLayerSubtitleProps) {
   return (
@@ -33,25 +30,6 @@ export function TwoLayerSubtitle({
           ))
         )}
       </div>
-      {turns.length > 0 ? (
-        <div className="space-y-3 border-t border-slate-200 pt-5" aria-label="完整对话">
-          {turns.map((turn) => (
-            <article key={turn.transcriptEventId} className="space-y-1">
-              <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                {turn.speaker === "pharmacist" ? "Pharmacist" : "Parent"}
-              </p>
-              <p className="text-lg font-semibold leading-relaxed text-slate-800">
-                {turn.sourceText}
-              </p>
-              {turn.translatedText ? (
-                <p className="text-xl font-bold leading-relaxed text-navy">
-                  {turn.translatedText}
-                </p>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
 }

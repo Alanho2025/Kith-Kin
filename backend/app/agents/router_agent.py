@@ -23,6 +23,18 @@ PHARMACY_MARKERS = (
     "dose",
     "药",
     "降血压",
+    "过敏",
+    "用药",
+    "处方",
+    "配药",
+    "取药",
+    "冲突",
+    "衝突",
+    "副作用",
+    "布洛芬",
+    "阿司匹林",
+    "华法林",
+    "華法林",
 )
 PRIVACY_MARKERS = (
     "credit card",
@@ -42,6 +54,16 @@ PRIVACY_MARKERS = (
     "ignore previous",
     "system prompt",
     "developer message",
+    "信用卡",
+    "护照",
+    "地址",
+    "身份证",
+    "身分證",
+    "银行",
+    "銀行",
+    "密码",
+    "密碼",
+    "医疗保险",
 )
 FAMILY_ACTION_MARKERS = (
     "save the summary",
@@ -50,6 +72,15 @@ FAMILY_ACTION_MARKERS = (
     "send this to my son",
     "send this to my family",
     "notify family",
+    "保存",
+    "发送",
+    "發送",
+    "通知",
+    "女儿",
+    "女兒",
+    "儿子",
+    "兒子",
+    "家人",
 )
 FALLBACK_MARKERS = (
     "kk is speaking",
@@ -59,6 +90,19 @@ RESPONSE_NEEDED_MARKERS = (
     "prescription",
     "pick up",
     "refill",
+    "how can i help",
+    "how are you",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "你好",
+    "怎么帮您",
+    "早上好",
+    "下午好",
+    "晚上好",
+    "有什么需要",
+    "配药",
+    "取药",
 )
 PASSIVE_TRANSLATION_MARKERS = (
     "may make you sleepy",
@@ -133,8 +177,16 @@ class RouterAgent(BaseAgent):
                 confidence=0.9,
                 reason_code=RouteReasonCode.PHARMACY_TERM,
             )
+
+        is_greeting = text_lower.startswith(
+            ("hi", "hello", "good morning", "good afternoon", "good evening")
+        ) or any(
+            marker in text_lower
+            for marker in ("hello", "how can i help", "how are you", "你好", "怎么帮您")
+        )
         if (
-            any(marker in text_lower for marker in RESPONSE_NEEDED_MARKERS)
+            is_greeting
+            or any(marker in text_lower for marker in RESPONSE_NEEDED_MARKERS)
             or "?" in text_lower
             or text_lower.startswith(("do ", "does ", "can ", "would "))
         ):

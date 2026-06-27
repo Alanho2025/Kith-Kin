@@ -44,7 +44,7 @@ describe("TwoLayerSubtitle", () => {
     const secondFinal = conversationReducer(
       firstFinal,
       makeEvent("translation.final", "evt-translation-2", {
-        sourceTranscriptEventId: "evt-source-2",
+        sourceTranscriptEventId: "evt-source-1",
         segmentId: "segment-2",
         sourceLanguage: "en",
         targetLanguage: "zh_cn",
@@ -66,6 +66,46 @@ describe("TwoLayerSubtitle", () => {
     expect(screen.queryByText("Are you taking")).not.toBeInTheDocument();
     expect(screen.getByText("Are you taking any medicine?")).toBeInTheDocument();
     expect(screen.getByText("您有在服用任何药物吗？")).toBeInTheDocument();
+    expect(screen.getByText("请告诉我药名。")).toBeInTheDocument();
+  });
+
+  it("clears old segments when new utterance starts", () => {
+    const firstFinal = conversationReducer(
+      initialConversationState,
+      makeEvent("translation.final", "evt-translation-1", {
+        sourceTranscriptEventId: "evt-source-1",
+        segmentId: "segment-1",
+        sourceLanguage: "en",
+        targetLanguage: "zh_cn",
+        translatedText: "您有在服用任何药物吗？",
+        mode: "faithful",
+        appendOnly: true,
+        latencyMs: 220,
+      }),
+    );
+    const secondFinal = conversationReducer(
+      firstFinal,
+      makeEvent("translation.final", "evt-translation-2", {
+        sourceTranscriptEventId: "evt-source-2",
+        segmentId: "segment-2",
+        sourceLanguage: "en",
+        targetLanguage: "zh_cn",
+        translatedText: "请告诉我药名。",
+        mode: "faithful",
+        appendOnly: true,
+        latencyMs: 180,
+      }),
+    );
+
+    render(
+      <TwoLayerSubtitle
+        partialEnglish={secondFinal.partialEnglish}
+        turns={secondFinal.turns}
+        chineseSegments={secondFinal.chineseSegments}
+      />,
+    );
+
+    expect(screen.queryByText("您有在服用任何药物吗？")).not.toBeInTheDocument();
     expect(screen.getByText("请告诉我药名。")).toBeInTheDocument();
   });
 });

@@ -33,10 +33,11 @@ async def test_notification_confirmation(
     memory_repo = MemoryRepository(db_sessions, clock.now)
     notification_repo = NotificationRepository(db_sessions, clock.now)
     visit_repo = VisitRepository(db_sessions)
-    
+
     session_service = SessionService(session_store, clock.now, visit_repo)
-    
+
     session_events = []
+
     def get_session_events(sid: UUID):
         return session_events
 
@@ -45,27 +46,28 @@ async def test_notification_confirmation(
         notification_repository=notification_repo,
         get_session_events=get_session_events,
     )
-    
+
     confirmation_repository = InMemoryConfirmationRepository()
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
-    
+
     card_service = CardService(
         clock=clock.now,
         executor=completion_executor,
         repository=confirmation_repository,
     )
-    
+
     # Verify user profile has the expected local family contact label
     async with db_sessions() as session:
         from app.db.models.user import User
+
         user = await session.get(User, TEST_USER_ID)
         assert user.family_contact_label == local_family_destination
-    
+
     session_record = await session_service.create(user_id=TEST_USER_ID, encounter_type="pharmacy")
     context = TrustedRequestContext(
         session_id=session_record.session_id, user_id=TEST_USER_ID, origin="test"
     )
-    
+
     prov_evt = first_visit_transcript[0]
     event = TranscriptFinalEvent(
         schema_version="0.1",
@@ -81,13 +83,13 @@ async def test_notification_confirmation(
             language=prov_evt.language,
             text=prov_evt.text,
             revision=prov_evt.revision,
-        )
+        ),
     )
     session_events.append(event.model_dump(mode="json"))
-    
+
     # 1. Prepare draft summary
     await completion_service.prepare_summary(session_record.session_id, context)
-    
+
     # 2. Register, select, and confirm NOTIFY_FAMILY card
     card_set_id = f"cards_{uuid4()}"
     notify_card = ResponseCard(
@@ -110,15 +112,15 @@ async def test_notification_confirmation(
         cards=(notify_card,),
     )
     card_service.register_card_set(card_set, context)
-    
+
     selected = await card_service.select(
         CardSelectCommand(card_set_id=card_set_id, card_id=notify_card.card_id, revision=1),
         context,
     )
-    
+
     # Confirming triggers the send_stub operation on the notification repository
     await card_service.confirm_selected(selected.confirmation_id, context)
-    
+
     # Verify the notification is audited in the db
     async with db_sessions() as session:
         notif = await session.scalar(

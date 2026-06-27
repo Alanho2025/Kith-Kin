@@ -1,6 +1,7 @@
 """Shared runtime command handling for card confirmation flows."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.core.constants import CardActionType
@@ -10,8 +11,11 @@ from app.schemas.runtime_events import (
     CardCancelEvent,
     CardConfirmEvent,
     CardSelectEvent,
+    PleaseWaitEvent,
+    RepeatEvent,
     RuntimeEvent,
     SelfSpeakEvent,
+    SessionEndEvent,
 )
 from app.services.card_service import CardService
 
@@ -98,8 +102,48 @@ class RuntimeCommandService:
             await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
+                    "audio.muted",
+                    {"muted": False, "reason": "user_control"},
+                    event.event_id,
+                ),
+                RuntimeCommandEvent(
                     "audio.listening",
                     {"active": True},
+                    event.event_id,
+                ),
+            )
+        if isinstance(event, PleaseWaitEvent):
+            await self._cards.cancel_all_pending(context)
+            return (
+                RuntimeCommandEvent(
+                    "audio.muted",
+                    {"muted": True, "reason": "user_control"},
+                    event.event_id,
+                ),
+                RuntimeCommandEvent(
+                    "audio.listening",
+                    {"active": False},
+                    event.event_id,
+                ),
+            )
+        if isinstance(event, RepeatEvent):
+            # Acknowledge the repeat request by signaling that we are listening
+            return (
+                RuntimeCommandEvent(
+                    "audio.listening",
+                    {"active": True},
+                    event.event_id,
+                ),
+            )
+        if isinstance(event, SessionEndEvent):
+            await self._cards.cancel_all_pending(context)
+            return (
+                RuntimeCommandEvent(
+                    "session.ended",
+                    {
+                        "reason": event.payload.reason,
+                        "ended_at": datetime.now(UTC).isoformat(),
+                    },
                     event.event_id,
                 ),
             )

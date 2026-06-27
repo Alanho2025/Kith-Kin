@@ -24,11 +24,7 @@ def _create_branch_ctx(
 ) -> InvocationContext:
     ctx = invocation_context.model_copy()
     branch_suffix = f"{agent.name}.{sub_agent.name}"
-    ctx.branch = (
-        f"{ctx.branch}.{branch_suffix}"
-        if ctx.branch
-        else branch_suffix
-    )
+    ctx.branch = f"{ctx.branch}.{branch_suffix}" if ctx.branch else branch_suffix
     return ctx
 
 
@@ -60,11 +56,7 @@ class OrchestratorAgent(BaseAgent):
             self.guardian.run_async(guardian_ctx),
         ]
 
-        merge_func = (
-            _merge_agent_run
-            if sys.version_info >= (3, 11)
-            else _merge_agent_run_pre_3_11
-        )
+        merge_func = _merge_agent_run if sys.version_info >= (3, 11) else _merge_agent_run_pre_3_11
 
         async with Aclosing(merge_func(agent_runs)) as merged:
             async for event in merged:
@@ -84,10 +76,7 @@ class OrchestratorAgent(BaseAgent):
         # short-circuit: if Guardian fail-closes (privacy/injection),
         # do NOT call Companion LLM at all
         if guardian_decision.decision == GuardianDecisionType.BLOCK:
-            msg = (
-                f"Guardian fail-closed turn with {guardian_decision.decision}. "
-                "Short-circuiting."
-            )
+            msg = f"Guardian fail-closed turn with {guardian_decision.decision}. Short-circuiting."
             yield Event(author=self.name, message=msg)
             return
 

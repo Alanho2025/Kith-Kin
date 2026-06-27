@@ -39,12 +39,6 @@ def final_event(text: str) -> TranscriptFinalEvent:
     )
 
 
-@pytest.fixture(autouse=True)
-def mock_no_google_api_key(monkeypatch) -> None:
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-
-
 @pytest.mark.anyio
 async def test_recall_coq10_when_present_in_prior_summary() -> None:
     # 1. Setup session service with prefetch cache containing CoQ10 advice
