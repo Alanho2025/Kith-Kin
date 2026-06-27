@@ -62,6 +62,7 @@ export function AppRouter() {
       runtime={runtime}
       sessionId={isMock ? "mock-session" : realSessionId}
       isMock={isMock}
+      onRestart={() => setStarted(false)}
     />
   ) : (
     <StartPage

@@ -195,6 +195,7 @@ def create_app(
         user_id=user_id,
         live_gateway=gemini_live_adapter,
         settings=resolved_settings,
+        completion_service=completion_service,
     )
     session_service.register_cleanup_callback(live_runtime_service.discard_session)
     session_service.register_cleanup_callback(card_service.discard_session)
