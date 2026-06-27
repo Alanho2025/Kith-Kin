@@ -206,7 +206,9 @@ def build_companion_instruction(
     allergies_str = ", ".join(allergies) if allergies else "None"
     recall_section = f"\nPrior Visit Summary: {prior_summary}" if prior_summary else ""
     conversation_section = (
-        f"\nRecent Session Conversation:\n{conversation_context}" if conversation_context else ""
+        f"\nRecent Session Conversation:\n{conversation_context}"
+        if conversation_context
+        else ""
     )
 
     return f"""{base_prompt}

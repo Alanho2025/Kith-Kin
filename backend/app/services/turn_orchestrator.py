@@ -245,7 +245,8 @@ class TurnOrchestrator:
             base_prompt, meds, allergies, prior_summary, conversation_context
         )
         print(
-            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, prior: {prior_summary}",
+            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, "
+            f"prior: {prior_summary}",
             flush=True,
         )
 
@@ -311,7 +312,8 @@ class TurnOrchestrator:
                 new_message=new_message,
             ):
                 print(
-                    f"[ADK EVENT] Author={event_yielded.author}, Message={event_yielded.message}",
+                    f"[ADK EVENT] Author={event_yielded.author}, "
+                    f"Message={event_yielded.message}",
                     flush=True,
                 )
         except Exception as e:
@@ -351,7 +353,8 @@ class TurnOrchestrator:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
             proposal = CardSetProposal.model_validate(proposal_data)
             print(
-                f"[PROPOSAL CARDS] {[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
+                "[PROPOSAL CARDS] "
+                f"{[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
                 flush=True,
             )
 
