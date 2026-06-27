@@ -41,6 +41,7 @@ class MockSessionPort(AsyncMock):
                 yield e
             if not self._closed:
                 await asyncio.sleep(3600)
+
         return event_generator()
 
     async def close(self) -> None:
@@ -77,11 +78,11 @@ def live_app_client() -> TestClient:
         live_transport="gemini_live",
         google_api_key="test_api_key",
     )
-    
+
     app = create_app(settings=settings, clock=clock.now)
     app.state.mock_live_gateway = AsyncMock()
     app.state.live_runtime_service._live_gateway = app.state.mock_live_gateway
-    
+
     with TestClient(app) as client:
         yield client
 
@@ -102,7 +103,7 @@ async def test_live_transport_fails_gracefully_on_open_error(live_app_client: Te
         assert ready["event_type"] == "session.ready"
         listening = socket.receive_json()
         assert listening["event_type"] == "audio.listening"
-        
+
         fallback = socket.receive_json()
         assert fallback["event_type"] == "fallback.show"
         assert fallback["payload"]["code"] == "LIVE_UNAVAILABLE"

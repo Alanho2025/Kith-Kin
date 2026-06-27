@@ -102,8 +102,15 @@ export function conversationReducer(
     case "tool.status":
       return recordEvent(state, event, { status: "checking" });
     case "cards.render": {
-      const payload = event.payload as { cardSet: CardSetView };
-      return recordEvent(state, event, { activeCardSet: payload.cardSet });
+      const payload = event.payload as { cardSet: any };
+      const cardSet = payload.cardSet ? {
+        ...payload.cardSet,
+        cards: (payload.cardSet.cards || []).map((card: any) => ({
+          ...card,
+          actionType: card.actionType || card.action?.type || "no_action",
+        })),
+      } : null;
+      return recordEvent(state, event, { activeCardSet: cardSet });
     }
     case "card.selected": {
       const payload = event.payload as {
@@ -111,9 +118,15 @@ export function conversationReducer(
         cardId: string;
         confirmationId: string;
       };
-      const card = state.activeCardSet?.cards.find(
+      let card = state.activeCardSet?.cards.find(
         (candidate) => candidate.cardId === payload.cardId,
       );
+      if (card) {
+        card = {
+          ...card,
+          actionType: card.actionType || (card as any).action?.type || "no_action",
+        };
+      }
       const confirmation: ConfirmationView | null = card
         ? {
             confirmationId: payload.confirmationId,
