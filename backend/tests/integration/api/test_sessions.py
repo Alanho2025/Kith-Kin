@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from .conftest import ORIGIN, create_session
@@ -39,3 +41,19 @@ def test_end_session_blocks_new_ticket(app_client: TestClient) -> None:
     )
     assert ticket.status_code == 409
     assert ticket.json()["code"] == "SESSION_NOT_CONNECTABLE"
+
+
+def test_end_session_runs_session_cleanup_callbacks(app_client: TestClient) -> None:
+    session_id = create_session(app_client)
+    sid = UUID(session_id)
+    app_client.app.state.live_runtime_service._buffers[sid] = [{"sequence": 1}]
+    app_client.app.state.session_service.prefetch_cache[sid] = [{"cached": True}]
+
+    ended = app_client.post(
+        f"/api/sessions/{session_id}/end",
+        json={"reason": "user_completed"},
+    )
+
+    assert ended.status_code == 200
+    assert sid not in app_client.app.state.live_runtime_service._buffers
+    assert sid not in app_client.app.state.session_service.prefetch_cache

@@ -7,8 +7,12 @@ from app.domain.safety_policy import BackstopReason, SafetyBackstopResult, scree
     ("text", "reason"),
     [
         ("What is your credit card number?", BackstopReason.PAYMENT_REQUEST),
+        ("What is your BSB and bank account?", BackstopReason.PAYMENT_REQUEST),
+        ("What is your account number?", BackstopReason.PAYMENT_REQUEST),
         ("Can I see your passport?", BackstopReason.IDENTITY_REQUEST),
         ("What is your home address?", BackstopReason.ADDRESS_REQUEST),
+        ("What is your residential address?", BackstopReason.ADDRESS_REQUEST),
+        ("Can you confirm your address?", BackstopReason.ADDRESS_REQUEST),
     ],
 )
 def test_payment_identity_address_are_blocked(text: str, reason: BackstopReason) -> None:
@@ -23,6 +27,15 @@ def test_prompt_injection_is_blocked() -> None:
 
     assert result is SafetyBackstopResult.BLOCK
     assert reason is BackstopReason.PROMPT_INJECTION
+
+
+def test_passive_side_effect_explanation_is_allowed_for_translation_only() -> None:
+    result, _risk, reason = screen_turn_text(
+        "This medicine may make you sleepy, so avoid driving after taking it."
+    )
+
+    assert result is SafetyBackstopResult.ALLOW
+    assert reason is BackstopReason.NONE
 
 
 @pytest.mark.parametrize(

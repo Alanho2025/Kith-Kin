@@ -401,16 +401,44 @@ The goal is low change cost. Prefer clear, testable, safe code over clever code.
 - Provider errors must be mapped into safe application errors.
 - Do not expose hidden prompts, full prompts with sensitive data, provider debug output, or raw Gemini responses to the frontend.
 
-### 5. ADK agent boundaries
+### 5. ADK agent architecture — Hard Constraints (non-negotiable)
 
-- Router, Companion, and Guardian have separate responsibilities.
-- Router classifies transcript events and routes the next step.
-- Companion handles pharmacy reasoning, memory search, drug checks, and response card generation.
-- Guardian runs on every turn as a parallel safety layer.
-- Guardian is a policy gate, not a suggestion agent.
-- Router and Guardian are text-level agents. They must not open their own Gemini Live API sessions.
-- Agent prompts and tool contracts must be documented and versioned.
-- Agent outputs must use structured schemas where possible.
+#### A. Multi-agent graph — the #1 scoring risk, protect it
+- Router, Guardian, AND Companion MUST each be a real ADK agent in the orchestration graph (imported from `google.adk.agents`). Never ship a bare Python if/else class presented as an "agent". `google-adk` must be imported and USED, not just a declared dependency.
+- A root `OrchestratorAgent` MUST delegate Router → Guardian → Companion. The multi-agent graph must be visible in code.
+- Only the **Companion** uses an LLM (`gemini-2.5-flash`). **Router and Guardian stay deterministic** (ADK agents wrapping deterministic logic). Do NOT add an LLM to routing or safety — determinism there is demo-safe, auditable, and is a Writeup selling point.
+
+#### B. Deterministic tool boundary — the LLM never invents facts
+- `check_drug_interaction` and all knowledge/RAG tools stay DETERMINISTIC (DB lookups). The LLM reasons, decides which tools to call, and composes cards — it NEVER generates drug/medical facts.
+- Even when the patient profile is pre-injected into the Companion instruction, the LLM MUST call `check_drug_interaction` for the actual verdict. Never infer an interaction from prompt text.
+
+#### C. Safety ordering — fail-closed
+- Guardian runs BEFORE Companion every turn. If Guardian fail-closes (payment / passport / Medicare / address / prompt-injection / medical-advice), SHORT-CIRCUIT the turn — do NOT call the Companion LLM. Sensitive requests never reach the model.
+- Guardian's deterministic fail-closed backstop is intentional; never remove or weaken it.
+
+#### D. Data layering
+- Clinical drug knowledge is SEPARATE from per-user medications / allergies memory tables. Never merge or store one as the other.
+- `drug_knowledge.py` lives in-repo (`backend/app/data/`), version-controlled. Never import data from a path outside the repo.
+- Keep the demo seed and the knowledge base reconciled: every drug the demo parent is seeded on MUST exist in the knowledge base so interactions resolve.
+
+#### E. Testing discipline
+- Replacing deterministic logic with LLM calls makes output non-deterministic → MOCK the ADK `Runner` / `LlmAgent` in unit + integration tests; assert contract validity + correct tool calls, NOT exact text.
+- Deterministic agents (Router/Guardian) keep their deterministic tests. Drug-interaction tool tests stay as-is.
+- Live LLM smoke tests are gated behind `GOOGLE_API_KEY` and skipped in CI.
+- Full gate must pass before "done": `ruff` + `mypy` + `pytest` + `evals/run.py`.
+
+#### F. Collaboration / git hygiene (multiple agents work in parallel)
+- One task = one branch named `feat/...`. NEVER commit to `main`. Open a PR for human review/merge.
+- At any time, only ONE branch may touch `backend/app/adapters/mcp_tool_adapter.py`.
+- At any time, only ONE branch may add an Alembic migration.
+- Parallel agents stay in non-overlapping directories (e.g. `eval/` + `docs/` vs `backend/app/`).
+
+#### G. Secrets & config
+- No API keys or passwords in code. Use `.env` (gitignored); the frontend uses ephemeral tokens only. If a key or model config is needed, ASK — never hardcode.
+
+#### H. Process — every non-trivial task
+- Investigate the repo first → show a PLAN → STOP for human approval → implement on a branch → run the full gate → report results.
+- If where data/logic should live is ambiguous, ASK rather than guess.
 
 ### 6. MCP tool conventions
 

@@ -21,7 +21,10 @@ export class MockConversationRuntime implements ConversationRuntime {
   private sessionId = "mock-session";
   private sequence = 100;
 
-  constructor(private readonly flow: readonly ConversationRuntimeEvent[]) {
+  constructor(
+    private readonly flow: readonly ConversationRuntimeEvent[],
+    private readonly delayMs: number = 0,
+  ) {
     const cardEvent = flow.find((event) => event.eventType === "cards.render");
     this.cardSet = cardEvent && isCardSetPayload(cardEvent.payload)
       ? cardEvent.payload.cardSet
@@ -30,9 +33,18 @@ export class MockConversationRuntime implements ConversationRuntime {
 
   async connect(sessionId: string): Promise<void> {
     this.sessionId = sessionId;
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (this.delayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    }
+    
     for (const event of this.flow) {
+      if (this.listeners.size === 0) return;
+      
       this.emit({ ...event, sessionId });
+      
+      if (this.delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, this.delayMs));
+      }
     }
   }
 

@@ -5,6 +5,8 @@ import type {
   ConversationRuntimeEvent,
   RuntimeCommandView,
 } from "../viewModels";
+import { AudioPlayer } from "./AudioPlayer";
+import { AudioRecorder } from "./AudioRecorder";
 
 
 const envelopeSchema = z
@@ -22,6 +24,7 @@ const envelopeSchema = z
 
 export interface RuntimeSocket {
   binaryType: BinaryType;
+  readyState: number;
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
@@ -68,34 +71,64 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private socket: RuntimeSocket | null = null;
   private sessionId = "";
   private sequence = 1;
+  private audioRecorder: AudioRecorder | null = null;
+  private audioPlayer: AudioPlayer | null = null;
+  private connectionGeneration = 0;
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
-    this.fetchFn = options.fetchFn ?? fetch;
+    this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
     this.socketFactory = options.socketFactory ?? ((url) => new WebSocket(url));
     this.baseUrl = (options.baseUrl ?? globalThis.location.origin).replace(/\/$/, "");
   }
 
   async connect(sessionId: string): Promise<void> {
+    const generation = ++this.connectionGeneration;
     this.sessionId = sessionId;
     const response = await this.fetchFn(
       `${this.baseUrl}/api/sessions/${sessionId}/ticket`,
       { method: "POST", credentials: "include" },
     );
     if (!response.ok) throw new Error("RUNTIME_TICKET_REQUEST_FAILED");
+    if (generation !== this.connectionGeneration) return;
     const websocketBase = this.baseUrl.replace(/^http/, "ws");
     const socket = this.socketFactory(`${websocketBase}/api/sessions/${sessionId}/live`);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onmessage = (message) => this.handleMessage(message);
+
+    this.audioPlayer = new AudioPlayer();
+    this.audioPlayer.start();
+
+    this.audioRecorder = new AudioRecorder();
+
     await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => resolve();
+      socket.onopen = () => {
+        socket.onclose = null;
+        resolve();
+      };
       socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
+      socket.onclose = () => reject(new Error("RUNTIME_DISCONNECTED"));
+    });
+
+    if (generation !== this.connectionGeneration) {
+      socket.close();
+      return;
+    }
+    await this.audioRecorder.start((pcm) => {
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(pcm);
+      }
     });
   }
 
   disconnect(): Promise<void> {
+    this.connectionGeneration += 1;
     this.socket?.close();
     this.socket = null;
+    this.audioRecorder?.stop();
+    this.audioRecorder = null;
+    this.audioPlayer?.stop();
+    this.audioPlayer = null;
     return Promise.resolve();
   }
 
@@ -121,7 +154,16 @@ export class BackendConversationRuntime implements ConversationRuntime {
   }
 
   private handleMessage(message: MessageEvent): void {
-    if (typeof message.data !== "string") return;
+    if (typeof message.data !== "string") {
+      if (message.data instanceof ArrayBuffer) {
+        this.audioPlayer?.play(message.data);
+      } else if (message.data instanceof Blob) {
+        void message.data.arrayBuffer().then((buf) => {
+          this.audioPlayer?.play(buf);
+        });
+      }
+      return;
+    }
     const envelope = envelopeSchema.parse(JSON.parse(message.data));
     const event: ConversationRuntimeEvent = {
       schemaVersion: envelope.schema_version,
@@ -133,6 +175,17 @@ export class BackendConversationRuntime implements ConversationRuntime {
       correlationId: envelope.correlation_id,
       payload: camelize(envelope.payload),
     };
+
+    if (event.eventType === "audio.muted") {
+      const payloadObj = event.payload as Record<string, unknown> | null;
+      const isMuted = payloadObj?.muted;
+      if (isMuted) {
+        this.audioRecorder?.pause();
+      } else {
+        this.audioRecorder?.resume();
+      }
+    }
+
     for (const listener of this.listeners) listener(event);
   }
 }
