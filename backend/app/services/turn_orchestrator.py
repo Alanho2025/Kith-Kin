@@ -28,6 +28,19 @@ from app.services.card_service import CardService
 
 logger = logging.getLogger(__name__)
 
+# Specific drug names (not class words like "nsaid"/"antibiotic") that, when
+# named in a turn, must trigger a drug-interaction check deterministically rather
+# than relying on the companion LLM to remember to call the tool. Safety backstop.
+INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
+    {
+        "ibuprofen", "diclofenac", "naproxen", "aspirin",
+        "warfarin",
+        "lisinopril", "perindopril", "ramipril",
+        "candesartan", "telmisartan", "irbesartan",
+        "amlodipine", "atorvastatin", "rosuvastatin",
+    }
+)
+
 
 class RouterPort(Protocol):
     async def route(self, event: TranscriptFinalEvent) -> RouteDecision: ...
@@ -154,31 +167,49 @@ class TurnOrchestrator:
         mcp_adapter = self._mcp_tool_adapter_factory(context)
         companion_any: Any = self._companion
 
-        # 2. Warm medications and allergies
-        meds = []
-        allergies = []
-        try:
-            profile_res = await mcp_adapter.memory_search("profile", ("profile",))
-            if profile_res.ok and profile_res.data:
-                for record in profile_res.data.records:
-                    val = record.value
-                    record_type = val.get("record_type")
-                    content = val.get("content")
-                    if record_type == "medication" and content:
-                        meds.append(content)
-                    elif record_type == "allergy" and content:
-                        allergies.append(content)
-                    else:
-                        if isinstance(content, str):
-                            try:
-                                content = json.loads(content)
-                            except Exception:
-                                pass
-                        if isinstance(content, dict):
-                            meds.extend(content.get("medications", []))
-                            allergies.extend(content.get("allergies", []))
-        except Exception:
-            logger.warning("Failed to warm patient profile in turn orchestrator")
+        # 2. Warm medications and allergies — only for medication-risk turns.
+        # The pharmacy_risk route is the router's risk trigger (dose, allergy,
+        # interaction, medicine name, recall), so we retrieve the patient profile
+        # only when it is actually relevant — not on every companion turn.
+        meds: list[Any] = []
+        allergies: list[Any] = []
+        if route.route_type is RouteType.PHARMACY_RISK:
+            try:
+                profile_res = await mcp_adapter.memory_search("profile", ("profile",))
+                if profile_res.ok and profile_res.data:
+                    for record in profile_res.data.records:
+                        val = record.value
+                        record_type = val.get("record_type")
+                        content = val.get("content")
+                        if record_type == "medication" and content:
+                            meds.append(content)
+                        elif record_type == "allergy" and content:
+                            allergies.append(content)
+                        else:
+                            if isinstance(content, str):
+                                try:
+                                    content = json.loads(content)
+                                except Exception:
+                                    pass
+                            if isinstance(content, dict):
+                                meds.extend(content.get("medications", []))
+                                allergies.extend(content.get("allergies", []))
+            except Exception:
+                logger.warning("Failed to warm patient profile in turn orchestrator")
+
+            # Deterministic drug-interaction safety check: if the turn names a
+            # specific drug, always run check_drug_interaction — don't rely on the
+            # companion LLM to remember to call it. The result is traced; the
+            # companion still produces the confirmation card.
+            text_lower = event.payload.text.lower()
+            named_drugs = [name for name in INTERACTION_DRUG_NAMES if name in text_lower]
+            if named_drugs:
+                new_drug = named_drugs[0]
+                current_meds = tuple([*named_drugs[1:], *meds])
+                try:
+                    await mcp_adapter.check_drug_interaction(new_drug, current_meds)
+                except Exception:
+                    logger.warning("Deterministic drug-interaction check failed")
 
         prior_summary = None
         if getattr(companion_any, "_session_service", None) is not None:
