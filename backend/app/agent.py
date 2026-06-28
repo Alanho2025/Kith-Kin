@@ -1,19 +1,19 @@
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.adapters.mcp_tool_adapter import McpToolAdapter
-from app.agents.orchestrator_agent import OrchestratorAgent
-from app.agents.router_agent import RouterAgent
-from app.agents.guardian_agent import GuardianAgent
 from app.agents.companion_agent import (
     CompanionAgent,
-    make_memory_search,
-    make_check_drug_interaction,
-    make_submit_response_cards,
-    load_companion_prompt_template,
     build_companion_instruction,
+    load_companion_prompt_template,
+    make_check_drug_interaction,
+    make_memory_search,
+    make_submit_response_cards,
 )
+from app.agents.guardian_agent import GuardianAgent
+from app.agents.orchestrator_agent import OrchestratorAgent
+from app.agents.router_agent import RouterAgent
 from app.core.config import Settings
 from app.db.base import import_models
 from app.db.session import create_engine, create_session_factory
@@ -22,8 +22,8 @@ from app.domain.credentials import TrustedRequestContext
 # Import all models to resolve table metadata foreign keys
 import_models()
 
-from app.repositories.memory_repository import MemoryRepository
 from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
+from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.trace_repository import TraceRepository
 from app.services.rag_service import RagService

@@ -210,7 +210,9 @@ async def _run_adk_runner_with_retries(
             await asyncio.wait_for(consume_runner(), timeout=30.0)
             return
         except Exception as exc:
-            is_transient = _is_transient_model_error(exc) or isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+            is_transient = _is_transient_model_error(exc) or isinstance(
+                exc, (asyncio.TimeoutError, TimeoutError)
+            )
             if attempt >= max_attempts or not is_transient:
                 raise
             delay_seconds = min(2.0 * attempt, 5.0)
