@@ -5,7 +5,6 @@ import pytest
 
 from app.agents.companion_agent import CompanionAgent
 from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
-from app.schemas.cards import CardType
 from app.schemas.runtime_events import TranscriptFinalEvent
 
 NOW = datetime(2026, 6, 22, tzinfo=UTC)
@@ -67,11 +66,9 @@ async def test_recall_coq10_when_present_in_prior_summary() -> None:
         f"guardian_{uuid4()}",
     )
 
-    assert len(proposal.card_set.cards) == 1
-    card = proposal.card_set.cards[0]
-    assert card.card_type == CardType.ASK_QUESTION
-    assert "辅酶Q10" in card.zh_text
-    assert "Coenzyme Q10" in card.en_text
+    assert len(proposal.card_set.cards) == 3
+    assert any("辅酶Q10" in card.zh_text for card in proposal.card_set.cards)
+    assert any("Coenzyme Q10" in card.en_text for card in proposal.card_set.cards)
 
 
 @pytest.mark.anyio
@@ -92,9 +89,8 @@ async def test_no_recall_coq10_when_absent_in_prior_summary() -> None:
         f"guardian_{uuid4()}",
     )
 
-    assert len(proposal.card_set.cards) == 1
-    card = proposal.card_set.cards[0]
+    assert len(proposal.card_set.cards) == 3
     # Verify we do not suggest CoQ10 if absent in prior summary
-    assert "辅酶Q10" not in card.zh_text
-    assert "Coenzyme Q10" not in card.en_text
-    assert "处方药" in card.zh_text
+    assert not any("辅酶Q10" in card.zh_text for card in proposal.card_set.cards)
+    assert not any("Coenzyme Q10" in card.en_text for card in proposal.card_set.cards)
+    assert any("处方药" in card.zh_text for card in proposal.card_set.cards)

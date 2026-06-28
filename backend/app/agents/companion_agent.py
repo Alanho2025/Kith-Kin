@@ -447,80 +447,208 @@ class CompanionAgent(Agent):
             text_lower = event.payload.text.lower()
 
             if "save the summary" in text_lower or "save this" in text_lower:
-                draft_card = {
-                    "card_type": "memory_action",
-                    "zh_text": "是否保存这次药房记录？确认后保存。",
-                    "en_text": "Save this pharmacy visit summary after confirmation.",
-                    "risk_level": "medical",
-                    "action": {"type": "save_memory"},
-                }
+                draft_cards = [
+                    {
+                        "card_type": "memory_action",
+                        "zh_text": "是否保存这次药房记录？确认后保存。",
+                        "en_text": "Save this pharmacy visit summary after confirmation.",
+                        "risk_level": "medical",
+                        "action": {"type": "save_memory"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请药剂师写下药房指示",
+                        "en_text": "Ask pharmacist to write down pharmacy instructions",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请药剂师重复一遍",
+                        "en_text": "Ask pharmacist to repeat",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif (
                 "send this to my daughter" in text_lower
                 or "send this to my son" in text_lower
                 or "send this to my family" in text_lower
                 or "notify family" in text_lower
             ):
-                draft_card = {
-                    "card_type": "family_action",
-                    "zh_text": "是否发送药房沟通摘要给家人？",
-                    "en_text": "Send this pharmacy summary to family after confirmation.",
-                    "risk_level": "medical",
-                    "action": {"type": "notify_family"},
-                }
+                draft_cards = [
+                    {
+                        "card_type": "family_action",
+                        "zh_text": "是否发送药房沟通摘要给家人？",
+                        "en_text": "Send this pharmacy summary to family after confirmation.",
+                        "risk_level": "medical",
+                        "action": {"type": "notify_family"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请药剂师写下处方详情",
+                        "en_text": "Ask pharmacist to write down prescription details",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请药剂师重复一遍",
+                        "en_text": "Ask pharmacist to repeat",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif "listen to pro" in text_lower or "lisinopril" in text_lower:
-                draft_card = {
-                    "card_type": "ask_to_write_down",
-                    "zh_text": "请药剂师写下药品名",
-                    "en_text": "Ask pharmacist to write down the drug name",
-                    "risk_level": "normal",
-                    "action": {"type": "no_action"},
-                }
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请帮我確認衝突：這個藥會不會和我現在吃的降血壓藥衝突？",
+                        "en_text": "Does this conflict with my blood pressure medicine?",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请药剂师写下药品名",
+                        "en_text": "Ask pharmacist to write down the drug name",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请向药剂师确认服用剂量",
+                        "en_text": "Ask pharmacist to confirm dosage",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif "ibuprofen" in text_lower:
-                draft_card = {
-                    "card_type": "ask_question",
-                    "zh_text": "询问药剂师：使用布洛芬是否与我目前的药物有冲突？",
-                    "en_text": "Ask pharmacist: Does Ibuprofen conflict with my meds?",
-                    "risk_level": "normal",
-                    "action": {"type": "no_action"},
-                }
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "询问药剂师：使用布洛芬是否与我目前的药物有冲突？",
+                        "en_text": "Ask pharmacist: Does Ibuprofen conflict with my meds?",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请药剂师写下药名",
+                        "en_text": "Ask pharmacist to write down the drug name",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请药剂师重复一遍",
+                        "en_text": "Ask pharmacist to repeat",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif "allergies" in text_lower or "allergy" in text_lower:
-                draft_card = {
-                    "card_type": "ask_question",
-                    "zh_text": "请向药剂师确认我的过敏史",
-                    "en_text": "Ask pharmacist to confirm my allergies",
-                    "risk_level": "normal",
-                    "action": {"type": "no_action"},
-                }
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请向药剂师确认我的过敏史",
+                        "en_text": "Ask pharmacist to confirm my allergies",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "询问药剂师：这个新药会引起过敏吗？",
+                        "en_text": "Ask pharmacist: Does this new drug cause allergies?",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请药剂师重复一遍",
+                        "en_text": "Ask pharmacist to repeat",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif "pick up" in text_lower or "prescription" in text_lower or "refill" in text_lower:
                 is_coq10 = prior_summary and (
                     "coenzyme" in prior_summary.lower() or "coq10" in prior_summary.lower()
                 )
                 if is_coq10:
-                    draft_card = {
-                        "card_type": "ask_question",
-                        "zh_text": "询问药剂师：我需要服用辅酶Q10吗？",
-                        "en_text": "Ask pharmacist: Should I take Coenzyme Q10?",
-                        "risk_level": "normal",
-                        "action": {"type": "no_action"},
-                    }
+                    draft_cards = [
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "询问药剂师：我需要服用辅酶Q10吗？",
+                            "en_text": "Ask pharmacist: Should I take Coenzyme Q10?",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        },
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "请向药剂师确认我的处方药",
+                            "en_text": "Ask pharmacist to confirm my prescription",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        },
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "请药剂师重复一遍",
+                            "en_text": "Ask pharmacist to repeat",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        }
+                    ]
                 else:
-                    draft_card = {
+                    draft_cards = [
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "请向药剂师确认我的处方药",
+                            "en_text": "Ask pharmacist to confirm my prescription",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        },
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "询问药剂师：我有几种处方药要拿？",
+                            "en_text": "Ask pharmacist: How many prescriptions to pick up?",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        },
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "请药剂师重复一遍",
+                            "en_text": "Ask pharmacist to repeat",
+                            "risk_level": "normal",
+                            "action": {"type": "no_action"},
+                        }
+                    ]
+            else:
+                draft_cards = [
+                    {
                         "card_type": "ask_question",
-                        "zh_text": "请向药剂师确认我的处方药",
-                        "en_text": "Ask pharmacist to confirm my prescription",
+                        "zh_text": "请药剂师重复一遍",
+                        "en_text": "Ask pharmacist to repeat",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请药剂师说慢一点",
+                        "en_text": "Ask pharmacist to speak slowly",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请药剂师写下来",
+                        "en_text": "Ask pharmacist to write it down",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
-            else:
-                draft_card = {
-                    "card_type": "ask_question",
-                    "zh_text": "请药剂师重复一遍",
-                    "en_text": "Ask pharmacist to repeat",
-                    "risk_level": "normal",
-                    "action": {"type": "no_action"},
-                }
+                ]
 
-            draft = CompanionCardDraftSet.model_validate({"cards": [draft_card]})
+            draft = CompanionCardDraftSet.model_validate({"cards": draft_cards})
             proposal = materialize_companion_card_draft(
                 draft,
                 source_event_id=event.event_id,

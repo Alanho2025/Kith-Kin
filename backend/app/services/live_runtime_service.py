@@ -331,6 +331,26 @@ class LiveRuntimeService:
         session_id: UUID,
         provider_event: ProviderTranscriptEvent,
     ) -> tuple[dict[str, object], ...]:
+        # Filter out self-echoes of Kith & Kin's TTS spoken English
+        last_spoken = self._last_spoken_text.get(session_id)
+        if last_spoken and provider_event.text:
+            import re
+            norm_incoming = re.sub(r'[^a-z0-9\s]', '', provider_event.text.lower()).strip()
+            norm_spoken = re.sub(r'[^a-z0-9\s]', '', last_spoken.lower()).strip()
+            is_match = (
+                norm_incoming == norm_spoken
+                or (len(norm_spoken) > 5 and norm_spoken in norm_incoming)
+                or (len(norm_incoming) > 5 and norm_incoming in norm_spoken)
+            )
+            if is_match:
+                logger.info(
+                    "Filtered out self-echo for session %s: incoming=%r, last_spoken=%r",
+                    session_id,
+                    provider_event.text,
+                    last_spoken,
+                )
+                return ()
+
         is_final = provider_event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
         transcript = self._append_event(
             session_id,
@@ -421,6 +441,8 @@ class LiveRuntimeService:
         if self._turn_orchestrator is None or self._user_id is None:
             return emitted
         event = TranscriptFinalEvent.model_validate(transcript)
+        if event.payload.speaker != "pharmacist":
+            return emitted
         try:
             outcome = await self._turn_orchestrator.process_final_turn(
                 event,
@@ -854,23 +876,23 @@ class LiveRuntimeService:
                 self._paused_sessions.discard(session_id)
             elif isinstance(event, RepeatEvent):
                 self._paused_sessions.discard(session_id)
-                last_text = self._last_spoken_text.get(session_id)
-                if last_text:
-                    muted_evt = self._append_event(
-                        session_id,
-                        "audio.muted",
-                        {"muted": True, "reason": "tts_playback"},
-                    )
-                    await websocket.send_json(muted_evt)
+                repeat_text = "Could you please say that again?"
+                muted_evt = self._append_event(
+                    session_id,
+                    "audio.muted",
+                    {"muted": True, "reason": "tts_playback"},
+                )
+                await websocket.send_json(muted_evt)
 
-                    speaking_evt = self._append_event(
-                        session_id,
-                        "audio.speaking",
-                        {"phase": "started", "card_id": f"repeat-{uuid4()}"},
-                    )
-                    await websocket.send_json(speaking_evt)
-                    self._speech_sessions.add(session_id)
-                    await port.send_text(last_text)
+                speaking_evt = self._append_event(
+                    session_id,
+                    "audio.speaking",
+                    {"phase": "started", "card_id": f"repeat-{uuid4()}"},
+                )
+                await websocket.send_json(speaking_evt)
+                self._speech_sessions.add(session_id)
+                self._last_spoken_text[session_id] = repeat_text
+                await port.send_text(repeat_text)
 
             outcomes = await self._command_service.handle(event, session_id=session_id)
             for command_outcome in outcomes:

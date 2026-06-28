@@ -2,6 +2,10 @@ import { test, expect } from "@playwright/test";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
   test.beforeAll(() => {
@@ -34,9 +38,11 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     await expect(page.getByRole("button", { name: "按住说中文" })).toBeVisible();
     await expect(page.getByText("听懂药剂师，再安全回应")).toBeVisible();
     await expect(page.getByLabel("忠实中文翻译")).toContainText("您有在服用降压药吗？");
-    await expect(page.getByRole("complementary", { name: "对话记录" })).toContainText(
+    await expect(page.getByRole("complementary", { name: "对话记录" }).first()).toContainText(
       "Are you taking any blood pressure medicine?",
     );
+
+    await expect(page.getByText("安全检查已完成")).toBeVisible();
 
     const responseCard = page
       .locator('button:has-text("降血压药冲突")')
@@ -47,6 +53,5 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
 
     await expect(page.locator("#confirmation-title")).toContainText("你要让我用英文说这句吗？");
     await expect(page.getByRole("button", { name: "替我说" })).toBeVisible();
-    await expect(page.getByText("安全检查已完成")).toBeVisible();
   });
 });

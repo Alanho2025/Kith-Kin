@@ -100,10 +100,12 @@ export function conversationReducer(
             },
           ]
         : state.turns;
+      const isPharmacist = payload.speaker === "pharmacist";
       return recordEvent(state, event, {
         status: event.eventType === "transcript.partial" ? "transcribing" : "translating",
         partialEnglish: payload.text,
         turns,
+        confirmation: isPharmacist ? null : state.confirmation,
       });
     }
     case "translation.pending":
