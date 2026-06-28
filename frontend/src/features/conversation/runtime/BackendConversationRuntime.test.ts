@@ -17,9 +17,11 @@ class FakeSocket implements RuntimeSocket {
   onerror: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   readonly sent: string[] = [];
+  readonly sentBinary: ArrayBufferLike[] = [];
 
   send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
     if (typeof data === "string") this.sent.push(data);
+    else if (data instanceof ArrayBuffer) this.sentBinary.push(data);
   }
 
   close(): void {
@@ -149,7 +151,11 @@ describe("BackendConversationRuntime", () => {
   it("plays binary messages and handles audio.muted events", async () => {
     const playSpy = vi.spyOn(AudioPlayer.prototype, "play").mockImplementation(() => {});
     const startPlayerSpy = vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
-    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation(() => Promise.resolve());
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
     const pauseSpy = vi.spyOn(AudioRecorder.prototype, "pause").mockImplementation(() => {});
     const resumeSpy = vi.spyOn(AudioRecorder.prototype, "resume").mockImplementation(() => {});
 
@@ -173,7 +179,13 @@ describe("BackendConversationRuntime", () => {
     await connected;
 
     expect(startPlayerSpy).toHaveBeenCalled();
+    expect(startRecorderSpy).not.toHaveBeenCalled();
+
+    runtime.setMicrophoneEnabled(true);
     expect(startRecorderSpy).toHaveBeenCalled();
+    const pcm = new ArrayBuffer(10);
+    sendAudio(pcm);
+    expect(socket.sentBinary).toEqual([pcm]);
 
     // Emit binary message
     const buffer = new ArrayBuffer(10);
@@ -195,6 +207,8 @@ describe("BackendConversationRuntime", () => {
       },
     });
     expect(pauseSpy).toHaveBeenCalled();
+    sendAudio(new ArrayBuffer(10));
+    expect(socket.sentBinary).toEqual([pcm]);
 
     // Emit audio.muted (false)
     socket.emitJson({
@@ -211,6 +225,9 @@ describe("BackendConversationRuntime", () => {
       },
     });
     expect(resumeSpy).toHaveBeenCalled();
+
+    runtime.setMicrophoneEnabled(false);
+    expect(pauseSpy).toHaveBeenCalledTimes(2);
 
     playSpy.mockRestore();
     startPlayerSpy.mockRestore();

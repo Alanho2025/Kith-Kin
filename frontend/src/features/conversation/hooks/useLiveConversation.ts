@@ -22,9 +22,14 @@ export function useLiveConversation(runtime: ConversationRuntime, sessionId: str
     [runtime],
   );
 
+  const setMicrophoneEnabled = useCallback(
+    (enabled: boolean) => runtime.setMicrophoneEnabled(enabled),
+    [runtime],
+  );
+
   const dismissConfirmation = useCallback(() => {
     dispatch({ type: "dismiss_confirmation" });
   }, []);
 
-  return { state, sendCommand, dismissConfirmation };
+  return { state, sendCommand, setMicrophoneEnabled, dismissConfirmation };
 }

@@ -22,7 +22,7 @@ describe("ResponseCard", () => {
       ]);
     });
     expect(
-      await screen.findByRole("dialog", { name: "确认让 KK 代您表达" }),
+      await screen.findByRole("dialog", { name: "你要让我用英文说这句吗？" }),
     ).toBeInTheDocument();
     expect(runtime.commands.some((command) => command.eventType === "card.confirm")).toBe(false);
   });
@@ -32,8 +32,8 @@ describe("ResponseCard", () => {
     render(<ConversationPage runtime={runtime} sessionId="ses-cancel" />);
 
     fireEvent.click(await screen.findByRole("button", { name: /请帮我确认这个药/ }));
-    const dialog = await screen.findByRole("dialog", { name: "确认让 KK 代您表达" });
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    const dialog = await screen.findByRole("dialog", { name: "你要让我用英文说这句吗？" });
+    fireEvent.click(screen.getByRole("button", { name: "重选" }));
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(runtime.commands.at(-1)).toEqual({

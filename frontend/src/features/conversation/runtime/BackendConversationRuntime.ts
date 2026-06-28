@@ -39,6 +39,22 @@ interface BackendConversationRuntimeOptions {
   baseUrl?: string;
 }
 
+type MicMode =
+  | "idle"
+  | "listening_to_pharmacist"
+  | "user_speaking"
+  | "system_speaking"
+  | "paused"
+  | "error";
+
+interface AudioGate {
+  userMicEnabled: boolean;
+  backendMuted: boolean;
+  websocketReady: boolean;
+  recorderReady: boolean;
+  canSendAudio: boolean;
+}
+
 function camelCaseKey(key: string): string {
   return key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
 }
@@ -74,6 +90,10 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private audioRecorder: AudioRecorder | null = null;
   private audioPlayer: AudioPlayer | null = null;
   private connectionGeneration = 0;
+  private userMicEnabled = false;
+  private backendMuted = false;
+  private recorderStarted = false;
+  private micMode: MicMode = "idle";
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
     this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
@@ -114,11 +134,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
       socket.close();
       return;
     }
-    await this.audioRecorder.start((pcm) => {
-      if (this.socket?.readyState === WebSocket.OPEN) {
-        this.socket.send(pcm);
-      }
-    });
+    this.updateRecorderGate();
   }
 
   disconnect(): Promise<void> {
@@ -129,7 +145,19 @@ export class BackendConversationRuntime implements ConversationRuntime {
     this.audioRecorder = null;
     this.audioPlayer?.stop();
     this.audioPlayer = null;
+    this.backendMuted = false;
+    this.recorderStarted = false;
+    this.userMicEnabled = false;
+    this.micMode = "idle";
     return Promise.resolve();
+  }
+
+  setMicrophoneEnabled(enabled: boolean): void {
+    this.userMicEnabled = enabled;
+    if (this.micMode !== "system_speaking" && this.micMode !== "error") {
+      this.micMode = enabled ? "listening_to_pharmacist" : "paused";
+    }
+    this.updateRecorderGate();
   }
 
   sendCommand(command: RuntimeCommandView): Promise<void> {
@@ -180,12 +208,66 @@ export class BackendConversationRuntime implements ConversationRuntime {
       const payloadObj = event.payload as Record<string, unknown> | null;
       const isMuted = payloadObj?.muted;
       if (isMuted) {
+        this.backendMuted = true;
+        this.micMode = "system_speaking";
         this.audioRecorder?.pause();
       } else {
-        this.audioRecorder?.resume();
+        this.backendMuted = false;
+        this.micMode = this.userMicEnabled ? "listening_to_pharmacist" : "paused";
+        this.updateRecorderGate();
       }
     }
 
     for (const listener of this.listeners) listener(event);
+  }
+
+  private updateRecorderGate(): void {
+    const socket = this.socket;
+    if (!this.audioRecorder || !socket) return;
+    const wantsAudio =
+      this.userMicEnabled &&
+      !this.backendMuted &&
+      socket.readyState === WebSocket.OPEN &&
+      this.micMode !== "system_speaking" &&
+      this.micMode !== "error";
+
+    if (!this.recorderStarted) {
+      if (!wantsAudio) return;
+      this.recorderStarted = true;
+      void this.audioRecorder.start((pcm) => {
+        if (this.getAudioGate().canSendAudio) {
+          socket.send(pcm);
+        }
+      }).catch(() => {
+        this.userMicEnabled = false;
+        this.recorderStarted = false;
+        this.micMode = "error";
+      });
+      return;
+    }
+
+    if (wantsAudio) {
+      this.audioRecorder.resume();
+    } else {
+      this.audioRecorder.pause();
+    }
+  }
+
+  private getAudioGate(): AudioGate {
+    const websocketReady = this.socket?.readyState === WebSocket.OPEN;
+    const recorderReady = this.recorderStarted;
+    return {
+      userMicEnabled: this.userMicEnabled,
+      backendMuted: this.backendMuted,
+      websocketReady,
+      recorderReady,
+      canSendAudio:
+        this.userMicEnabled &&
+        !this.backendMuted &&
+        websocketReady &&
+        recorderReady &&
+        this.micMode !== "system_speaking" &&
+        this.micMode !== "error",
+    };
   }
 }
