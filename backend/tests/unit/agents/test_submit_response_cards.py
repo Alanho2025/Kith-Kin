@@ -225,9 +225,7 @@ async def test_live_adk_retries_transient_model_capacity_errors(monkeypatch):
         ]
     )
 
-    await _run_adk_runner_with_retries(
-        runner, user_id="u1", session_id="s1", new_message=None
-    )
+    await _run_adk_runner_with_retries(runner, user_id="u1", session_id="s1", new_message=None)
 
     assert runner.calls == 3
     assert delays == [2.0, 4.0]
@@ -242,8 +240,6 @@ async def test_live_adk_does_not_retry_non_transient_errors(monkeypatch):
     runner = FakeRunner([RuntimeError("draft schema validation failed")])
 
     with pytest.raises(RuntimeError, match="draft schema validation failed"):
-        await _run_adk_runner_with_retries(
-            runner, user_id="u1", session_id="s1", new_message=None
-        )
+        await _run_adk_runner_with_retries(runner, user_id="u1", session_id="s1", new_message=None)
 
     assert runner.calls == 1

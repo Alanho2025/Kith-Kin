@@ -21,6 +21,7 @@ dependencies = [
 eval = [
   "google-cloud-aiplatform[evaluation]",
 ]
+lint = []
 
 
 [build-system]
@@ -60,6 +61,7 @@ select = ["E", "F", "I", "B", "UP", "ASYNC"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+exclude = ["tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]

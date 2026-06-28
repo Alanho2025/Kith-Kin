@@ -77,7 +77,6 @@ def _get_chinese_question(en_q: str) -> str:
     return en_q
 
 
-
 class LiveRuntimeService:
     MAX_BUFFERED_EVENTS = 64
 
@@ -108,7 +107,6 @@ class LiveRuntimeService:
         self._speech_sessions: set[UUID] = set()
         self._paused_sessions: set[UUID] = set()
         self._last_spoken_text: dict[UUID, str] = {}
-
 
     def discard_session(self, session_id: UUID) -> None:
         self._buffers.pop(session_id, None)
@@ -284,7 +282,7 @@ class LiveRuntimeService:
                     questions_zh = [
                         _get_chinese_question(q) for q in summary_review.unresolved_questions
                     ]
-                    
+
                     summary_payload: dict[str, object] = {
                         "summary_id": f"sum-{uuid4()}",
                         "summary": {
@@ -899,7 +897,7 @@ class LiveRuntimeService:
                     questions_zh = [
                         _get_chinese_question(q) for q in summary_review.unresolved_questions
                     ]
-                    
+
                     summary_payload: dict[str, object] = {
                         "summary_id": f"sum-{uuid4()}",
                         "summary": {
@@ -920,7 +918,6 @@ class LiveRuntimeService:
                 except Exception as e:
                     logger.warning("Failed to generate visit summary: %s", e)
             return
-
 
         if isinstance(event, CardConfirmEvent):
             if self._user_id is None:
