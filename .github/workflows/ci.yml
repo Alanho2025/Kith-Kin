@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  # ---------- Free Offline Gates: Runs on every PR / Push to main ----------
+  offline-gates:
+    name: Offline Validation Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps
+        id: setup_backend
+        working-directory: backend
+        run: uv sync --frozen
+
+      # Hard gates: PR is blocked if these fail
+      - name: Secret / privilege scan
+        id: security
+        working-directory: backend
+        run: uv run python ../scripts/check_no_secrets.py
+
+      - name: Pytest (backend)
+        id: pytest
+        working-directory: backend
+        run: uv run pytest -q -p no:cacheprovider
+
+      - name: Eval contract (offline, enforces 15 cases)
+        id: eval_contract
+        working-directory: backend
+        run: uv run python -m pytest ../evals/test_runner.py -q
+
+      # Soft gates: informational only, does not block PR
+      - name: Ruff (informational)
+        id: ruff
+        continue-on-error: true
+        working-directory: backend
+        run: uv run ruff check app/ ../evals/
+
+      - name: Mypy (informational)
+        id: mypy
+        continue-on-error: true
+        working-directory: backend
+        run: uv run mypy app/
+
+  # ---------- Real Gemini Evaluation Gates: PR Merge & Manual dispatch ----------
+  live-eval:
+    name: Live Gemini API Evaluation Gates
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install frontend deps
+        id: setup_frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        id: playwright_install
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Install backend deps
+        id: setup_backend_live
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Initialize backend database
+        id: init_db
+        working-directory: backend
+        run: uv run python ../scripts/seed_demo_data.py --database-url sqlite+aiosqlite:///kithkin.db
+
+      - name: Real Gemini eval gate (15 cases)
+        id: real_eval
+        working-directory: backend
+        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
+
+      - name: Playwright E2E Tests
+        id: e2e
+        working-directory: frontend
+        run: npx playwright test
+
+  # ---------- Unified Results Reporting Job ----------
+  report:
+    name: CI Quality Gate Summary
+    needs: [offline-gates, live-eval]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate PR Merge Detail Summary
+        run: |
+          offline_res="${{ needs.offline-gates.result }}"
+          live_res="${{ needs.live-eval.result }}"
+
+          get_emoji() {
+            case "$1" in
+              success) echo "✅ Passed" ;;
+              failure) echo "❌ Failed" ;;
+              skipped) echo "⏭️ Skipped" ;;
+              *) echo "❓ Unknown" ;;
+            esac
+          }
+
+          echo "## Kith&Kin CI Quality Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verification run completed on branch \`${GITHUB_REF_NAME}\`." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check Category | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Offline Gates** | $(get_emoji $offline_res) | Security Scan, Pytests, and Eval Contract checks |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Live Gates (Gemini)** | $(get_emoji $live_res) | Real LLM Evals and Playwright E2E Tests |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$offline_res" = "failure" ] || [ "$live_res" = "failure" ]; then
+            echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+            echo "> One or more validation layers failed. Please review the build logs." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+            echo "> All triggered quality gates successfully verified." >> $GITHUB_STEP_SUMMARY
+          fi

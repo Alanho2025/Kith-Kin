@@ -200,6 +200,7 @@ async def _run_adk_runner_with_retries(
     """Run the live Companion ADK call with bounded retry for transient model errors."""
     for attempt in range(1, max_attempts + 1):
         try:
+
             async def consume_runner() -> None:
                 async for _ in runner.run_async(
                     user_id=user_id,
@@ -207,6 +208,7 @@ async def _run_adk_runner_with_retries(
                     new_message=new_message,
                 ):
                     pass
+
             await asyncio.wait_for(consume_runner(), timeout=30.0)
             return
         except Exception as exc:
@@ -221,7 +223,6 @@ async def _run_adk_runner_with_retries(
                 extra={"attempt": attempt, "max_attempts": max_attempts, "error": str(exc)},
             )
             await asyncio.sleep(delay_seconds)
-
 
 
 def load_companion_prompt_template() -> str:
@@ -262,9 +263,7 @@ def build_companion_instruction(
     allergies_str = ", ".join(allergies) if allergies else "None"
     recall_section = f"\nPrior Visit Summary: {prior_summary}" if prior_summary else ""
     conversation_section = (
-        f"\nRecent Session Conversation:\n{conversation_context}"
-        if conversation_context
-        else ""
+        f"\nRecent Session Conversation:\n{conversation_context}" if conversation_context else ""
     )
 
     return f"""{base_prompt}
@@ -551,6 +550,7 @@ class CompanionAgent(Agent):
             raise ValueError("COMPANION_OUTPUT_INVALID")
 
         from pydantic import ValidationError
+
         try:
             if proposal_dict:
                 proposal = CardSetProposal.model_validate(proposal_dict)

@@ -270,7 +270,7 @@ class TurnOrchestrator:
         tools = [
             make_memory_search(mcp_adapter),
             make_check_drug_interaction(mcp_adapter),
-            make_submit_response_cards(clock = submit_clock),
+            make_submit_response_cards(clock=submit_clock),
         ]
 
         # Use the companion ADK agent instance and clone it with bound tools/prompts

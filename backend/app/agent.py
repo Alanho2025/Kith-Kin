@@ -18,15 +18,14 @@ from app.core.config import Settings
 from app.db.base import import_models
 from app.db.session import create_engine, create_session_factory
 from app.domain.credentials import TrustedRequestContext
-
-# Import all models to resolve table metadata foreign keys
-import_models()
-
 from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.repositories.notification_repository import NotificationRepository
 from app.repositories.trace_repository import TraceRepository
 from app.services.rag_service import RagService
+
+# Import all models to resolve table metadata foreign keys
+import_models()
 
 # Load settings and ensure API keys are in environment
 settings = Settings()
@@ -34,7 +33,10 @@ if settings.google_api_key:
     os.environ["GOOGLE_API_KEY"] = settings.google_api_key.get_secret_value()
     os.environ["GEMINI_API_KEY"] = settings.google_api_key.get_secret_value()
 
-clock = lambda: datetime.now(UTC)
+
+def clock() -> datetime:
+    return datetime.now(UTC)
+
 
 # Initialize database components for tools
 db_engine = create_engine(settings.database_url)

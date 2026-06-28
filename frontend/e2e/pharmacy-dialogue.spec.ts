@@ -1,7 +1,31 @@
-import { expect, test } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
-test.describe("Kith&Kin elder-first conversation UI", () => {
-  test("shows voice control, translation, cards, confirmation, and conversation log", async ({ page }) => {
+test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
+  test.beforeAll(() => {
+    // 重新 Seed 數據庫確保數據一致性，並在 backend/kithkin.db 寫入 Demo 資料
+    console.log("正在重新 Seed 後端數據庫...");
+    let pythonCmd = "python";
+    const localVenv = path.join(__dirname, "../../backend/.venv/bin/python");
+    const winVenv = path.join(__dirname, "../../backend/.venv/Scripts/python.exe");
+    if (fs.existsSync(localVenv)) {
+      pythonCmd = localVenv;
+    } else if (fs.existsSync(winVenv)) {
+      pythonCmd = winVenv;
+    }
+    execSync(
+      `${pythonCmd} -m scripts.seed_demo_data --database-url sqlite+aiosqlite:///backend/kithkin.db`,
+      {
+        cwd: "../",
+        stdio: "inherit",
+      }
+    );
+  });
+
+  test("跑通老人在藥局的三輪對話且正常播放聲音", async ({ page }) => {
+    // 1. 打開首頁
     await page.goto("/");
 
     await page.getByRole("button", { name: "开始药房对话" }).click();
