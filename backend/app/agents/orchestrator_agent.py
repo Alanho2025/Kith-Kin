@@ -95,11 +95,18 @@ class OrchestratorAgent(BaseAgent):
         # 4. Guardian reviews proposed cards if they were submitted by Companion
         proposal_dict = ctx.session.state.get("companion_proposal")
         if proposal_dict:
-            proposal = CardSetProposal.model_validate(proposal_dict)
-            # Review cards deterministically (we call review_cards on the guardian agent instance)
-            card_review = await self.guardian.review_cards(proposal.card_set)
-            ctx.session.state["card_review"] = card_review.model_dump()
-            yield Event(
-                author=self.guardian.name,
-                message=f"Card review decision: {card_review.decision}",
-            )
+            from pydantic import ValidationError
+            try:
+                proposal = CardSetProposal.model_validate(proposal_dict)
+                # Review cards deterministically (we call review_cards on the guardian agent instance)
+                card_review = await self.guardian.review_cards(proposal.card_set)
+                ctx.session.state["card_review"] = card_review.model_dump()
+                yield Event(
+                    author=self.guardian.name,
+                    message=f"Card review decision: {card_review.decision}",
+                )
+            except ValidationError as e:
+                yield Event(
+                    author=self.name,
+                    message=f"Companion proposal failed validation: {e}. Reverting to fallback.",
+                )

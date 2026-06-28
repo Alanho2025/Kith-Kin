@@ -9,14 +9,24 @@ from app.adapters.provider_schemas import (
     TranslationRequest,
     TranslationSegment,
 )
+from app.agents.card_proposal_materializer import materialize_companion_card_draft
 from app.agents.companion_agent import CompanionAgent
 from app.agents.guardian_agent import GuardianAgent
 from app.agents.router_agent import RouterAgent
+from app.core.constants import CardRiskLevel, GuardianDecisionType
+from app.schemas.agent_outputs import (
+    CompanionCardDraftSet,
+    GuardianDecision,
+    GuardianReasonCode,
+    RouteDecision,
+    RouteReasonCode,
+    RouteType,
+)
 from app.services.card_service import CardService
 from app.services.live_runtime_service import LiveRuntimeService
 from app.services.task_supervisor import TaskSupervisor
 from app.services.translation_service import TranslationService
-from app.services.turn_orchestrator import TurnOrchestrator
+from app.services.turn_orchestrator import TurnOrchestrator, TurnOutcome
 
 NOW = datetime(2026, 6, 22, tzinfo=UTC)
 SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
@@ -133,6 +143,67 @@ async def test_successful_translation_runs_router_guardian_trace() -> None:
     route = next(event for event in events if event["event_type"] == "route.decision")
     assert route["payload"]["route_type"] == "pharmacy_risk"
     assert route["payload"]["reason_code"] == "pharmacy_term"
+
+
+async def test_card_review_block_surfaces_fallback_without_rendering_cards() -> None:
+    class BlockingCardReviewOrchestrator:
+        async def process_final_turn(self, event, context, conversation_context=None):
+            draft = CompanionCardDraftSet.model_validate(
+                {
+                    "cards": [
+                        {
+                            "card_type": "ask_question",
+                            "zh_text": "你可以吃这个药。",
+                            "en_text": "You can take this medicine.",
+                            "risk_level": "medical",
+                            "action": {"type": "speak"},
+                        }
+                    ]
+                }
+            )
+            proposal = materialize_companion_card_draft(
+                draft,
+                source_event_id=event.event_id,
+                generated_at=NOW,
+                guardian_decision_id="guardian-pending",
+            )
+            return TurnOutcome(
+                route=RouteDecision(
+                    route_type=RouteType.PHARMACY_RISK,
+                    confidence=0.9,
+                    reason_code=RouteReasonCode.PHARMACY_TERM,
+                ),
+                guardian=GuardianDecision(
+                    guardian_decision_id="guardian-turn",
+                    decision=GuardianDecisionType.ALLOW,
+                    risk_level=CardRiskLevel.NORMAL,
+                    reason_code=GuardianReasonCode.SAFE_TURN,
+                ),
+                card_proposal=proposal,
+                card_review=GuardianDecision(
+                    guardian_decision_id="guardian-card",
+                    decision=GuardianDecisionType.BLOCK,
+                    risk_level=CardRiskLevel.MEDICAL,
+                    reason_code=GuardianReasonCode.CARD_REVIEW_FAILED,
+                ),
+            )
+
+    gateway = CapturingTranslationGateway()
+    service = LiveRuntimeService(
+        CardService(lambda: NOW),
+        FakeLiveAdapter(),
+        lambda: NOW,
+        TranslationService(gateway, timeout_ms=1000),
+        turn_orchestrator=BlockingCardReviewOrchestrator(),
+        user_id=USER_ID,
+    )
+
+    events = await service.handle_provider_event(SESSION_ID, provider_transcript(final=True))
+    event_types = [event["event_type"] for event in events]
+
+    assert "cards.render" not in event_types
+    assert events[-1]["event_type"] == "fallback.show"
+    assert events[-1]["payload"]["code"] == "CARD_REVIEW_FAILED"
 
 
 async def test_partial_with_orchestrator_never_runs_router_guardian() -> None:

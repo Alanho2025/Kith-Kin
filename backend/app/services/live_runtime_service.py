@@ -498,6 +498,29 @@ class LiveRuntimeService:
                     correlation_id=event.event_id,
                 )
             )
+        elif (
+            outcome.card_proposal is not None
+            and outcome.card_review is not None
+            and outcome.card_review.decision is not GuardianDecisionType.ALLOW
+        ):
+            emitted.append(
+                self._append_event(
+                    session_id,
+                    "fallback.show",
+                    {
+                        "code": "CARD_REVIEW_FAILED",
+                        "message_zh": "这组回应卡片没有通过安全检查，翻译仍在继续。",
+                        "message_en": (
+                            "These response cards did not pass safety review; "
+                            "translation continues."
+                        ),
+                        "retryable": True,
+                        "recovery_action": "return_to_listening",
+                        "related_event_id": event.event_id,
+                    },
+                    correlation_id=event.event_id,
+                )
+            )
         return emitted
 
     @staticmethod

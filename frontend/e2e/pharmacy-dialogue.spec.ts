@@ -33,7 +33,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     await expect(statusBar).toContainText("KK 正在聆听", { timeout: 20000 });
 
     // 獲取測試輸入框與發送按鈕
-    const testInput = page.getByPlaceholder(/测试输入：模拟药剂师的英文发言/);
+    const testInput = page.getByPlaceholder(/語音無效時的替代文字輸入/);
     const sendBtn = page.getByRole("button", { name: "发送" });
 
     // --- 第一輪對話：確認過敏記錄 ---
@@ -45,7 +45,9 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     const penicillinCard = page
       .locator('button:has-text("Penicillin")')
       .or(page.locator('button:has-text("allergy")'))
+      .or(page.locator('button:has-text("allergies")'))
       .or(page.locator('button:has-text("过敏")'))
+      .or(page.locator('button:has-text("過敏")'))
       .first();
     await expect(penicillinCard).toBeVisible({ timeout: 20000 });
     await penicillinCard.click();
@@ -71,6 +73,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
       .locator('button:has-text("Lisinopril")')
       .or(page.locator('button:has-text("medications")'))
       .or(page.locator('button:has-text("用药")'))
+      .or(page.locator('button:has-text("用藥")'))
       .first();
     await expect(lisinoprilCard).toBeVisible({ timeout: 20000 });
     await lisinoprilCard.click();
@@ -93,6 +96,9 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     const conflictCard = page
       .locator('button:has-text("conflict")')
       .or(page.locator('button:has-text("Ibuprofen")'))
+      .or(page.locator('button:has-text("ibuprofen")'))
+      .or(page.locator('button:has-text("冲突")'))
+      .or(page.locator('button:has-text("衝突")'))
       .first();
     await expect(conflictCard).toBeVisible({ timeout: 20000 });
     await conflictCard.click();

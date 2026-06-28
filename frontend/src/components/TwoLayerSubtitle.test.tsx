@@ -58,7 +58,6 @@ describe("TwoLayerSubtitle", () => {
     render(
       <TwoLayerSubtitle
         partialEnglish={secondFinal.partialEnglish}
-        turns={secondFinal.turns}
         chineseSegments={secondFinal.chineseSegments}
       />,
     );
@@ -100,7 +99,6 @@ describe("TwoLayerSubtitle", () => {
     render(
       <TwoLayerSubtitle
         partialEnglish={secondFinal.partialEnglish}
-        turns={secondFinal.turns}
         chineseSegments={secondFinal.chineseSegments}
       />,
     );

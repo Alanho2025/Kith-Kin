@@ -12,7 +12,12 @@ from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 
+from app.agents.card_proposal_materializer import (
+    approve_card_proposal,
+    materialize_companion_card_draft,
+)
 from app.agents.companion_agent import (
+    _run_adk_runner_with_retries,
     build_companion_instruction,
     load_companion_prompt_template,
     make_check_drug_interaction,
@@ -22,7 +27,13 @@ from app.agents.companion_agent import (
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.core.constants import GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
-from app.schemas.agent_outputs import CardSetProposal, GuardianDecision, RouteDecision, RouteType
+from app.schemas.agent_outputs import (
+    CardSetProposal,
+    CompanionCardDraftSet,
+    GuardianDecision,
+    RouteDecision,
+    RouteType,
+)
 from app.schemas.cards import CardSet
 from app.schemas.runtime_events import TranscriptFinalEvent
 from app.services.card_service import CardService
@@ -55,11 +66,15 @@ INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
 class RouterPort(Protocol):
     async def route(self, event: TranscriptFinalEvent) -> RouteDecision: ...
 
+    def clone(self) -> Any: ...
+
 
 class GuardianPort(Protocol):
     async def review_turn(self, event: TranscriptFinalEvent) -> GuardianDecision: ...
 
     async def review_cards(self, card_set: CardSet) -> GuardianDecision: ...
+
+    def clone(self) -> Any: ...
 
 
 class CompanionPort(Protocol):
@@ -154,6 +169,8 @@ class TurnOrchestrator:
                 guardian.guardian_decision_id,
             )
             card_review = await self._guardian.review_cards(proposal.card_set)
+            if card_review.decision is GuardianDecisionType.ALLOW:
+                proposal = approve_card_proposal(proposal, card_review)
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)
             return TurnOutcome(route, guardian, proposal, card_review)
@@ -245,11 +262,7 @@ class TurnOrchestrator:
         companion_instruction = build_companion_instruction(
             base_prompt, meds, allergies, prior_summary, conversation_context
         )
-        print(
-            f"[PROFILE WARMING] meds: {meds}, allergies: {allergies}, "
-            f"prior: {prior_summary}",
-            flush=True,
-        )
+        logger.debug("Companion context warmed for route %s", route.route_type.value)
 
         # Bind tools
         submit_clock = self._clock or (lambda: datetime.now(UTC))
@@ -309,16 +322,12 @@ class TurnOrchestrator:
         ).message
 
         try:
-            async for event_yielded in runner.run_async(
+            await _run_adk_runner_with_retries(
+                runner,
                 user_id=user_id,
                 session_id=session_id,
                 new_message=new_message,
-            ):
-                print(
-                    f"[ADK EVENT] Author={event_yielded.author}, "
-                    f"Message={event_yielded.message}",
-                    flush=True,
-                )
+            )
         except Exception as e:
             logger.exception("ADK session execution failed")
             raise ValueError("COMPANION_UNAVAILABLE") from e
@@ -332,6 +341,7 @@ class TurnOrchestrator:
         route_data = session.state.get("route_decision")
         guardian_data = session.state.get("guardian_decision")
         proposal_data = session.state.get("companion_proposal")
+        draft_data = session.state.get("companion_card_draft")
         card_review_data = session.state.get("card_review")
 
         route_data = route_data or route.model_dump()
@@ -352,14 +362,18 @@ class TurnOrchestrator:
             guardian.decision is not GuardianDecisionType.BLOCK
             and route.route_type not in _NO_COMPANION_ROUTES
         ):
-            if not proposal_data:
+            if not proposal_data and not draft_data:
                 raise ValueError("COMPANION_OUTPUT_INVALID")
-            proposal = CardSetProposal.model_validate(proposal_data)
-            print(
-                "[PROPOSAL CARDS] "
-                f"{[(c.en_text, c.zh_text) for c in proposal.card_set.cards]}",
-                flush=True,
-            )
+            if proposal_data:
+                proposal = CardSetProposal.model_validate(proposal_data)
+            else:
+                draft = CompanionCardDraftSet.model_validate(draft_data)
+                proposal = materialize_companion_card_draft(
+                    draft,
+                    source_event_id=event.event_id,
+                    generated_at=submit_clock(),
+                    guardian_decision_id="guardian_pending",
+                )
 
             if not card_review_data:
                 logger.info(
@@ -368,13 +382,11 @@ class TurnOrchestrator:
                 )
                 card_review = await self._guardian.review_cards(proposal.card_set)
                 session.state["card_review"] = card_review.model_dump(mode="json")
-                try:
-                    await session_service.update_session(session)
-                except Exception:
-                    pass
             else:
                 card_review = GuardianDecision.model_validate(card_review_data)
 
+            if card_review.decision is GuardianDecisionType.ALLOW:
+                proposal = approve_card_proposal(proposal, card_review)
             # Register card set if allowed
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)

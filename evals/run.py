@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -542,7 +543,11 @@ EVALUATORS: dict[str, Evaluator] = {
 }
 
 
-async def _run_case(case: dict[str, Any]) -> dict[str, Any]:
+async def _run_case(
+    case: dict[str, Any],
+    *,
+    require_live_companion: bool = False,
+) -> dict[str, Any]:
     try:
         observed = await EVALUATORS[str(case["kind"])](case)
     except Exception as exc:
@@ -558,6 +563,21 @@ async def _run_case(case: dict[str, Any]) -> dict[str, Any]:
         }
 
     checks: list[dict[str, Any]] = list(observed["extra_checks"])
+    companion_output = observed["output"]
+    if require_live_companion and case["kind"] == "turn":
+        companion_error = (
+            companion_output.get("companion_error")
+            if isinstance(companion_output, Mapping)
+            else None
+        )
+        checks.append(
+            {
+                "name": "live_companion",
+                "passed": companion_error is None,
+                "expected": "no_companion_error",
+                "observed": companion_error,
+            }
+        )
     for name, expected, actual in (
         ("route", case["expected_route"], observed["route"]),
         ("guardian", case["expected_guardian"], observed["guardian"]),
@@ -641,8 +661,17 @@ def _load_suite(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], suite)
 
 
-async def _run_suite(suite: dict[str, Any]) -> dict[str, Any]:
-    results = [await _run_case(case) for case in suite["cases"]]
+async def _run_suite(
+    suite: dict[str, Any],
+    *,
+    require_live_companion: bool = False,
+) -> dict[str, Any]:
+    results = []
+    for case in suite["cases"]:
+        result = await _run_case(case, require_live_companion=require_live_companion)
+        results.append(result)
+        if case["kind"] == "turn" and case != suite["cases"][-1]:
+            await asyncio.sleep(6.0)
     passed = sum(result["status"] == "pass" for result in results)
     # Deferred cases (pending a team spec decision) are reported but do not gate.
     gated = [result for result in results if not result.get("deferred")]
@@ -670,14 +699,26 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cases", type=Path, help="Path to the 15-case JSON suite")
     parser.add_argument("--report", type=Path, help="Optional JSON baseline report path")
+    parser.add_argument(
+        "--require-live-companion",
+        action="store_true",
+        help=(
+            "Fail if GOOGLE_API_KEY is missing or any turn case falls back after "
+            "Companion LLM execution fails."
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.require_live_companion and not os.environ.get("GOOGLE_API_KEY"):
+            raise ValueError("GOOGLE_API_KEY_REQUIRED_FOR_LIVE_COMPANION_EVAL")
         suite = _load_suite(args.cases)
-        report = asyncio.run(_run_suite(suite))
+        report = asyncio.run(
+            _run_suite(suite, require_live_companion=args.require_live_companion)
+        )
     except (KeyError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False))
         return 2

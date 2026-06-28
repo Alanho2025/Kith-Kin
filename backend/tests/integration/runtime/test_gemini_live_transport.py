@@ -83,6 +83,21 @@ def live_app_client() -> TestClient:
     app.state.mock_live_gateway = AsyncMock()
     app.state.live_runtime_service._live_gateway = app.state.mock_live_gateway
 
+    # Mock the translation gateway to prevent hitting the real network
+    mock_translation_gateway = AsyncMock()
+    from app.adapters.provider_schemas import TranslationSegment
+    async def mock_translate_final(request):
+        return TranslationSegment(
+            source_transcript_event_id=request.source_event_id,
+            segment_id=f"seg_{request.utterance_id}",
+            source_language=request.source_language,
+            target_language=request.target_language,
+            translated_text="模擬中文翻譯",
+            latency_ms=1,
+        )
+    mock_translation_gateway.translate_final.side_effect = mock_translate_final
+    app.state.live_runtime_service._translation_service._gateway = mock_translation_gateway
+
     with TestClient(app) as client:
         yield client
 

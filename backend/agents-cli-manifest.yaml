@@ -1,0 +1,11 @@
+name: kithkin-backend
+agent_directory: app
+region: us-east1
+base_template: adk
+language: python
+create_params:
+  deployment_target: none
+  is_a2a: false
+  include_data_ingestion: false
+  session_type: none
+  cicd_runner: skip

@@ -7,7 +7,7 @@ from typing import Annotated, Any, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.constants import CardRiskLevel, GuardianDecisionType
-from app.schemas.cards import CardSet
+from app.schemas.cards import CardAction, CardSet, CardType
 
 
 class RouteType(StrEnum):
@@ -64,6 +64,31 @@ class GuardianDecision(BaseModel):
     decision: GuardianDecisionType
     risk_level: CardRiskLevel
     reason_code: GuardianReasonCode
+
+
+class CompanionCardDraft(BaseModel):
+    """Untrusted Companion card content before backend materialization."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    card_type: CardType
+    zh_text: Annotated[str, Field(min_length=1, max_length=120)]
+    en_text: Annotated[str, Field(min_length=1, max_length=240)]
+    risk_level: CardRiskLevel
+    action: CardAction
+
+    @property
+    def requires_backend_materialization(self) -> bool:
+        """Signal that IDs, lifecycle fields, and approval gates are backend-owned."""
+        return True
+
+
+class CompanionCardDraftSet(BaseModel):
+    """LLM-owned semantic card draft submitted through submit_response_cards."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cards: Annotated[tuple[CompanionCardDraft, ...], Field(min_length=1, max_length=3)]
 
 
 class CardSetProposal(BaseModel):

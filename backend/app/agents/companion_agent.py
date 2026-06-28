@@ -1,12 +1,13 @@
 """Companion card proposal agent using ADK LlmAgent."""
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from google.adk.agents import Agent
 from google.adk.events import Event
@@ -15,10 +16,21 @@ from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.tools.tool_context import ToolContext
 
 from app.adapters.mcp_tool_adapter import McpToolAdapter
-from app.schemas.agent_outputs import CardSetProposal, RouteDecision
+from app.agents.card_proposal_materializer import materialize_companion_card_draft
+from app.schemas.agent_outputs import CardSetProposal, CompanionCardDraftSet, RouteDecision
 from app.schemas.runtime_events import TranscriptFinalEvent
 
 logger = logging.getLogger(__name__)
+
+_TRANSIENT_MODEL_ERROR_MARKERS = (
+    "429",
+    "503",
+    "RESOURCE_EXHAUSTED",
+    "UNAVAILABLE",
+    "Too Many Requests",
+    "high demand",
+)
+_COMPANION_ADK_MAX_ATTEMPTS = 3
 
 
 def make_memory_search(adapter: McpToolAdapter) -> Callable[..., Any]:
@@ -81,100 +93,132 @@ def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., A
     """
 
     async def submit_response_cards(
-        proposal: CardSetProposal | dict[str, Any], tool_context: ToolContext
+        proposal: CompanionCardDraftSet | dict[str, Any], tool_context: ToolContext
     ) -> dict[str, Any]:
-        """Submit the proposed response cards for the patient to view and confirm.
+        """Submit semantic response-card drafts for backend approval.
 
         Args:
-            proposal: The structured card-set proposal containing cards and proposal hash.
+            proposal: Untrusted semantic card drafts from Companion.
 
         Returns:
-            A status dictionary indicating submission success.
+            A status dictionary indicating whether draft parsing succeeded.
         """
-        if isinstance(proposal, dict):
-            # Preprocessing to check/validate timestamps and default fields
-            card_set = proposal.setdefault("card_set", {})
-            if isinstance(card_set, dict):
-                if not card_set.get("source_event_id"):
-                    card_set["source_event_id"] = f"evt_{uuid4()}"
+        from pydantic import ValidationError
 
-                from datetime import datetime, timedelta
+        state: Any = tool_context.state
+        try:
+            draft = (
+                CompanionCardDraftSet.model_validate(proposal)
+                if isinstance(proposal, dict)
+                else proposal
+            )
+        except ValidationError as exc:
+            attempts = int(state.get("companion_proposal_error_count", 0)) + 1
+            state["companion_proposal_error_count"] = attempts
+            _discard_state_key(state, "companion_card_draft")
+            _discard_state_key(state, "companion_proposal")
+            state["companion_proposal_error"] = {
+                "code": "COMPANION_CARD_DRAFT_INVALID",
+                "attempts": attempts,
+                "retryable": attempts < 2,
+                "detail": str(exc),
+            }
+            logger.warning("Companion card draft validation failed")
+            return {
+                "status": "error",
+                "code": "COMPANION_CARD_DRAFT_INVALID",
+                "retryable": attempts < 2,
+            }
 
-                now_val = clock()
-                gen_str = card_set.get("generated_at")
-                exp_str = card_set.get("expires_at")
-                
-                try:
-                    gen_dt = (
-                        datetime.fromisoformat(str(gen_str).replace("Z", "+00:00"))
-                        if gen_str
-                        else None
-                    )
-                    exp_dt = (
-                        datetime.fromisoformat(str(exp_str).replace("Z", "+00:00"))
-                        if exp_str
-                        else None
-                    )
-                except Exception:
-                    gen_dt = None
-                    exp_dt = None
-
-                # Only override/shift if missing, invalid, or expired compared to current clock
-                if not gen_dt or not exp_dt or exp_dt <= gen_dt or exp_dt <= now_val:
-                    card_set["generated_at"] = now_val.isoformat()
-                    card_set["expires_at"] = (now_val + timedelta(minutes=15)).isoformat()
-
-                if not card_set.get("card_set_id"):
-                    card_set["card_set_id"] = f"cards_{uuid4()}"
-
-                if not card_set.get("revision"):
-                    card_set["revision"] = 1
-
-                cards = card_set.setdefault("cards", [])
-                if isinstance(cards, list):
-                    for card in cards:
-                        if isinstance(card, dict):
-                            # Default gates if missing, but do not overwrite if present
-                            if card.get("requires_guardian_approval") is None:
-                                card["requires_guardian_approval"] = True
-                            if card.get("requires_parent_confirmation") is None:
-                                card["requires_parent_confirmation"] = True
-
-                            if not card.get("card_id"):
-                                card["card_id"] = f"card_{uuid4()}"
-
-                            if not card.get("card_type"):
-                                card["card_type"] = "confirm_info"
-
-                            if not card.get("risk_level"):
-                                card["risk_level"] = "low"
-
-                            if not card.get("guardian_decision_id"):
-                                card["guardian_decision_id"] = f"gd_{uuid4()}"
-
-                            action = card.setdefault("action", {})
-                            if isinstance(action, dict):
-                                if not action.get("type"):
-                                    action["type"] = "no_action"
-
-            proposal_hash = proposal.get("proposal_hash")
-            if not isinstance(proposal_hash, str) or len(proposal_hash) < 8:
-                proposal["proposal_hash"] = f"hash_{uuid4()}"
-
-            from pydantic import ValidationError
-
-            try:
-                proposal_obj = CardSetProposal.model_validate(proposal)
-                tool_context.state["companion_proposal"] = proposal_obj.model_dump(mode="json")
-            except ValidationError as exc:
-                logger.warning("CardSetProposal validation failed: %s", exc)
-                # Keep original dict to fail closed gracefully at the validation boundary
-                tool_context.state["companion_proposal"] = proposal
-        else:
-            tool_context.state["companion_proposal"] = proposal.model_dump(mode="json")
-        return {"status": "success", "message": "Cards proposed successfully."}
+        _discard_state_key(state, "companion_proposal_error")
+        _discard_state_key(state, "companion_proposal")
+        state["companion_card_draft"] = draft.model_dump(mode="json")
+        return {"status": "success", "message": "Card drafts submitted for review."}
 
     return submit_response_cards
+
+
+def _discard_state_key(state: Any, key: str) -> None:
+    """Remove a session-state key from dict-like ADK state if it exists."""
+    try:
+        if hasattr(state, "__delitem__") or isinstance(state, dict):
+            del state[key]
+            return
+    except (KeyError, AttributeError, TypeError):
+        pass
+
+    try:
+        if hasattr(state, "pop"):
+            state.pop(key, None)
+            return
+    except Exception:
+        pass
+
+    deleted = False
+    for attr in ("_value", "_delta"):
+        dict_obj = getattr(state, attr, None)
+        if isinstance(dict_obj, dict):
+            try:
+                del dict_obj[key]
+                deleted = True
+            except KeyError:
+                pass
+            except TypeError:
+                pass
+
+    if not deleted:
+        try:
+            state[key] = None
+        except Exception:
+            pass
+
+
+def _is_transient_model_error(exc: BaseException) -> bool:
+    """Return true for retryable model-capacity/transport failures."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status_code = getattr(current, "status_code", None)
+        if status_code in (429, 503):
+            return True
+        message = f"{type(current).__name__}: {current}"
+        if any(marker in message for marker in _TRANSIENT_MODEL_ERROR_MARKERS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _run_adk_runner_with_retries(
+    runner: Runner,
+    *,
+    user_id: str,
+    session_id: str,
+    new_message: Any,
+    max_attempts: int = _COMPANION_ADK_MAX_ATTEMPTS,
+) -> None:
+    """Run the live Companion ADK call with bounded retry for transient model errors."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async def consume_runner() -> None:
+                async for _ in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=new_message,
+                ):
+                    pass
+            await asyncio.wait_for(consume_runner(), timeout=30.0)
+            return
+        except Exception as exc:
+            is_transient = _is_transient_model_error(exc) or isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+            if attempt >= max_attempts or not is_transient:
+                raise
+            delay_seconds = min(2.0 * attempt, 5.0)
+            logger.warning(
+                "Transient Companion ADK model error; retrying",
+                extra={"attempt": attempt, "max_attempts": max_attempts, "error": str(exc)},
+            )
+            await asyncio.sleep(delay_seconds)
 
 
 
@@ -238,7 +282,7 @@ Core Rules:
    submit_response_cards to ask for confirmation.
 4. You must propose response cards by calling submit_response_cards tool.
    Propose them in Chinese (zh_text) and English (en_text) matching
-   the CardSetProposal contract structure.
+   the CompanionCardDraftSet contract structure.
 5. You MUST NOT respond with free-form text. You MUST respond ONLY by calling
    the submit_response_cards tool to submit cards. Conversational text
    responses are strictly forbidden.
@@ -292,8 +336,8 @@ class CompanionAgent(Agent):
             The proposed card set.
         """
         # 1. Warm profile and recall summaries
-        meds = []
-        allergies = []
+        meds: list[str] = []
+        allergies: list[str] = []
         if mcp_adapter is not None:
             profile_res = await mcp_adapter.memory_search("profile", ("profile",))
             if profile_res.ok and profile_res.data:
@@ -301,9 +345,9 @@ class CompanionAgent(Agent):
                     val = record.value
                     record_type = val.get("record_type")
                     content = val.get("content")
-                    if record_type == "medication" and content:
+                    if record_type == "medication" and isinstance(content, str):
                         meds.append(content)
-                    elif record_type == "allergy" and content:
+                    elif record_type == "allergy" and isinstance(content, str):
                         allergies.append(content)
                     else:
                         if isinstance(content, str):
@@ -312,8 +356,16 @@ class CompanionAgent(Agent):
                             except Exception:
                                 pass
                         if isinstance(content, dict):
-                            meds.extend(content.get("medications", []))
-                            allergies.extend(content.get("allergies", []))
+                            meds.extend(
+                                item
+                                for item in content.get("medications", [])
+                                if isinstance(item, str)
+                            )
+                            allergies.extend(
+                                item
+                                for item in content.get("allergies", [])
+                                if isinstance(item, str)
+                            )
 
         prior_summary = None
         if self._session_service is not None:
@@ -380,138 +432,99 @@ class CompanionAgent(Agent):
 
         if api_key:
             try:
-                async for _ in runner.run_async(
+                await _run_adk_runner_with_retries(
+                    runner,
                     user_id=user_id,
                     session_id=session_id,
                     new_message=new_message,
-                ):
-                    pass
+                )
             except Exception as e:
                 logger.exception("ADK execution failed in propose_cards")
                 raise ValueError("COMPANION_UNAVAILABLE") from e
         else:
-            # Generate mock card proposal deterministically based on text
-            from app.core.constants import CardActionType, CardRiskLevel
-            from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
-
+            # Generate mock card drafts deterministically based on text.
             text_lower = event.payload.text.lower()
 
             if "save the summary" in text_lower or "save this" in text_lower:
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.MEMORY_ACTION,
-                    zh_text="是否保存这次药房记录？确认后保存。",
-                    en_text="Save this pharmacy visit summary after confirmation.",
-                    risk_level=CardRiskLevel.MEDICAL,
-                    action=CardAction(type=CardActionType.SAVE_MEMORY),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "memory_action",
+                    "zh_text": "是否保存这次药房记录？确认后保存。",
+                    "en_text": "Save this pharmacy visit summary after confirmation.",
+                    "risk_level": "medical",
+                    "action": {"type": "save_memory"},
+                }
             elif (
                 "send this to my daughter" in text_lower
                 or "send this to my son" in text_lower
                 or "send this to my family" in text_lower
                 or "notify family" in text_lower
             ):
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.FAMILY_ACTION,
-                    zh_text="是否发送药房沟通摘要给家人？",
-                    en_text="Send this pharmacy summary to family after confirmation.",
-                    risk_level=CardRiskLevel.MEDICAL,
-                    action=CardAction(type=CardActionType.NOTIFY_FAMILY),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "family_action",
+                    "zh_text": "是否发送药房沟通摘要给家人？",
+                    "en_text": "Send this pharmacy summary to family after confirmation.",
+                    "risk_level": "medical",
+                    "action": {"type": "notify_family"},
+                }
             elif "listen to pro" in text_lower or "lisinopril" in text_lower:
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_TO_WRITE_DOWN,
-                    zh_text="请药剂师写下药品名",
-                    en_text="Ask pharmacist to write down the drug name",
-                    risk_level=CardRiskLevel.NORMAL,
-                    action=CardAction(type=CardActionType.NO_ACTION),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "ask_to_write_down",
+                    "zh_text": "请药剂师写下药品名",
+                    "en_text": "Ask pharmacist to write down the drug name",
+                    "risk_level": "normal",
+                    "action": {"type": "no_action"},
+                }
             elif "ibuprofen" in text_lower:
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_QUESTION,
-                    zh_text="询问药剂师：使用布洛芬是否与我目前的药物有冲突？",
-                    en_text="Ask pharmacist: Does Ibuprofen conflict with my meds?",
-                    risk_level=CardRiskLevel.NORMAL,
-                    action=CardAction(type=CardActionType.NO_ACTION),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "ask_question",
+                    "zh_text": "询问药剂师：使用布洛芬是否与我目前的药物有冲突？",
+                    "en_text": "Ask pharmacist: Does Ibuprofen conflict with my meds?",
+                    "risk_level": "normal",
+                    "action": {"type": "no_action"},
+                }
             elif "allergies" in text_lower or "allergy" in text_lower:
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_QUESTION,
-                    zh_text="请向药剂师确认我的过敏史",
-                    en_text="Ask pharmacist to confirm my allergies",
-                    risk_level=CardRiskLevel.NORMAL,
-                    action=CardAction(type=CardActionType.NO_ACTION),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "ask_question",
+                    "zh_text": "请向药剂师确认我的过敏史",
+                    "en_text": "Ask pharmacist to confirm my allergies",
+                    "risk_level": "normal",
+                    "action": {"type": "no_action"},
+                }
             elif "pick up" in text_lower or "prescription" in text_lower or "refill" in text_lower:
                 is_coq10 = prior_summary and (
                     "coenzyme" in prior_summary.lower() or "coq10" in prior_summary.lower()
                 )
                 if is_coq10:
-                    mock_card = ResponseCard(
-                        card_id=f"card_{uuid4()}",
-                        card_type=CardType.ASK_QUESTION,
-                        zh_text="询问药剂师：我需要服用辅酶Q10吗？",
-                        en_text="Ask pharmacist: Should I take Coenzyme Q10?",
-                        risk_level=CardRiskLevel.NORMAL,
-                        action=CardAction(type=CardActionType.NO_ACTION),
-                        requires_parent_confirmation=True,
-                        requires_guardian_approval=True,
-                        guardian_decision_id=guardian_decision_id,
-                    )
+                    draft_card = {
+                        "card_type": "ask_question",
+                        "zh_text": "询问药剂师：我需要服用辅酶Q10吗？",
+                        "en_text": "Ask pharmacist: Should I take Coenzyme Q10?",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
                 else:
-                    mock_card = ResponseCard(
-                        card_id=f"card_{uuid4()}",
-                        card_type=CardType.ASK_QUESTION,
-                        zh_text="请向药剂师确认我的处方药",
-                        en_text="Ask pharmacist to confirm my prescription",
-                        risk_level=CardRiskLevel.NORMAL,
-                        action=CardAction(type=CardActionType.NO_ACTION),
-                        requires_parent_confirmation=True,
-                        requires_guardian_approval=True,
-                        guardian_decision_id=guardian_decision_id,
-                    )
+                    draft_card = {
+                        "card_type": "ask_question",
+                        "zh_text": "请向药剂师确认我的处方药",
+                        "en_text": "Ask pharmacist to confirm my prescription",
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
             else:
-                mock_card = ResponseCard(
-                    card_id=f"card_{uuid4()}",
-                    card_type=CardType.ASK_QUESTION,
-                    zh_text="请药剂师重复一遍",
-                    en_text="Ask pharmacist to repeat",
-                    risk_level=CardRiskLevel.NORMAL,
-                    action=CardAction(type=CardActionType.NO_ACTION),
-                    requires_parent_confirmation=True,
-                    requires_guardian_approval=True,
-                    guardian_decision_id=guardian_decision_id,
-                )
+                draft_card = {
+                    "card_type": "ask_question",
+                    "zh_text": "请药剂师重复一遍",
+                    "en_text": "Ask pharmacist to repeat",
+                    "risk_level": "normal",
+                    "action": {"type": "no_action"},
+                }
 
-            proposal = CardSetProposal(
-                card_set=CardSet(
-                    card_set_id=f"cards_{uuid4()}",
-                    revision=1,
-                    source_event_id=event.event_id,
-                    generated_at=self._clock(),
-                    expires_at=self._clock() + timedelta(minutes=3),
-                    cards=(mock_card,),
-                ),
-                proposal_hash="dummy_hash",
+            draft = CompanionCardDraftSet.model_validate({"cards": [draft_card]})
+            proposal = materialize_companion_card_draft(
+                draft,
+                source_event_id=event.event_id,
+                generated_at=self._clock(),
+                guardian_decision_id=guardian_decision_id,
             )
 
             # Write to the local runner session
@@ -531,8 +544,23 @@ class CompanionAgent(Agent):
         )
         assert session is not None
         proposal_dict = session.state.get("companion_proposal")
-        if not proposal_dict:
+        draft_dict = session.state.get("companion_card_draft")
+        if not proposal_dict and not draft_dict:
             raise ValueError("COMPANION_OUTPUT_INVALID")
 
-        proposal = CardSetProposal.model_validate(proposal_dict)
-        return proposal
+        from pydantic import ValidationError
+        try:
+            if proposal_dict:
+                proposal = CardSetProposal.model_validate(proposal_dict)
+            else:
+                draft = CompanionCardDraftSet.model_validate(draft_dict)
+                proposal = materialize_companion_card_draft(
+                    draft,
+                    source_event_id=event.event_id,
+                    generated_at=self._clock(),
+                    guardian_decision_id=guardian_decision_id,
+                )
+            return proposal
+        except ValidationError as e:
+            logger.warning("Companion proposal failed schema validation: %s", e)
+            raise ValueError("COMPANION_UNAVAILABLE") from e
