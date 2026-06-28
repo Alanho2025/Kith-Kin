@@ -1,0 +1,4 @@
+commands:
+  test: cd backend && python -m pytest
+  lint: cd backend && ruff check .
+  format: cd backend && ruff format --check .
