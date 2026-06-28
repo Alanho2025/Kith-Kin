@@ -4,9 +4,16 @@ import type { ResponseCardView } from "../features/conversation/viewModels";
 interface ResponseCardProps {
   card: ResponseCardView;
   onSelect: (card: ResponseCardView) => void;
+  intentLabel?: string;
+  recommended?: boolean;
 }
 
-export function ResponseCard({ card, onSelect }: ResponseCardProps) {
+export function ResponseCard({
+  card,
+  onSelect,
+  intentLabel = "安全回应",
+  recommended = false,
+}: ResponseCardProps) {
   return (
     <button
       type="button"
@@ -16,6 +23,16 @@ export function ResponseCard({ card, onSelect }: ResponseCardProps) {
     >
       <span className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
         <span>
+          <span className="mb-3 flex flex-wrap gap-2">
+            <span className="rounded-full bg-teal-100 px-3 py-1 text-base font-bold text-teal-800">
+              {intentLabel}
+            </span>
+            {recommended ? (
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-base font-bold text-amber-800">
+                推荐
+              </span>
+            ) : null}
+          </span>
           <span className="block text-2xl font-bold leading-snug text-navy">{card.zhText}</span>
           <span className="mt-2 block text-base leading-relaxed text-slate-500">{card.enText}</span>
         </span>

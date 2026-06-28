@@ -16,6 +16,7 @@ function isCardSetPayload(value: unknown): value is { cardSet: CardSetView } {
 
 export class MockConversationRuntime implements ConversationRuntime {
   readonly commands: RuntimeCommandView[] = [];
+  microphoneEnabled = false;
   private readonly listeners = new Set<(event: ConversationRuntimeEvent) => void>();
   private readonly cardSet: CardSetView | null;
   private sessionId = "mock-session";
@@ -51,6 +52,10 @@ export class MockConversationRuntime implements ConversationRuntime {
   disconnect(): Promise<void> {
     this.listeners.clear();
     return Promise.resolve();
+  }
+
+  setMicrophoneEnabled(enabled: boolean): void {
+    this.microphoneEnabled = enabled;
   }
 
   async sendCommand(command: RuntimeCommandView): Promise<void> {
