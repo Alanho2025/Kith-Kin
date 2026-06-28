@@ -266,7 +266,32 @@ async def _eval_turn(case: dict[str, Any]) -> dict[str, Any]:
     extra: list[dict[str, Any]] = []
     normalised: Any = {}
     try:
-        outcome = await orchestrator.process_final_turn(event, _context())
+        for attempt in range(1, 6):
+            try:
+                outcome = await orchestrator.process_final_turn(event, _context())
+                break
+            except Exception as exc:
+                exc_str = str(exc)
+                is_transient = any(
+                    marker in exc_str
+                    for marker in (
+                        "503",
+                        "429",
+                        "UNAVAILABLE",
+                        "ResourceExhausted",
+                        "high demand",
+                        "temporary",
+                    )
+                )
+                if attempt == 5 or not is_transient:
+                    raise
+                delay = 3.0 * attempt
+                print(
+                    f"\n[EVAL RETRY] Transient model error in turn {case['id']} (attempt {attempt}): {exc_str[:150]}. Retrying in {delay}s...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                await asyncio.sleep(delay)
         normalised = _normalise(outcome)
         route_value = str(_value(outcome.route.route_type))
         guardian_value = str(_value(outcome.guardian.decision))

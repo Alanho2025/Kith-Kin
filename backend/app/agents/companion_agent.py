@@ -30,7 +30,7 @@ _TRANSIENT_MODEL_ERROR_MARKERS = (
     "Too Many Requests",
     "high demand",
 )
-_COMPANION_ADK_MAX_ATTEMPTS = 5
+_COMPANION_ADK_MAX_ATTEMPTS = 3
 
 
 def make_memory_search(adapter: McpToolAdapter) -> Callable[..., Any]:
@@ -217,7 +217,7 @@ async def _run_adk_runner_with_retries(
             )
             if attempt >= max_attempts or not is_transient:
                 raise
-            delay_seconds = min(3.0 * attempt, 10.0)
+            delay_seconds = min(2.0 * attempt, 5.0)
             logger.warning(
                 "Transient Companion ADK model error; retrying",
                 extra={"attempt": attempt, "max_attempts": max_attempts, "error": str(exc)},
