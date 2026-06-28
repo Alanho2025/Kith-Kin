@@ -96,9 +96,11 @@ class OrchestratorAgent(BaseAgent):
         proposal_dict = ctx.session.state.get("companion_proposal")
         if proposal_dict:
             from pydantic import ValidationError
+
             try:
                 proposal = CardSetProposal.model_validate(proposal_dict)
-                # Review cards deterministically via guardian.review_cards
+                # Review cards deterministically (we call review_cards on the
+                # guardian agent instance)
                 card_review = await self.guardian.review_cards(proposal.card_set)
                 ctx.session.state["card_review"] = card_review.model_dump()
                 yield Event(

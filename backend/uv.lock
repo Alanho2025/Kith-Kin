@@ -1110,7 +1110,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
-provides-extras = ["eval"]
+provides-extras = ["eval", "lint"]
 
 [package.metadata.requires-dev]
 dev = [
