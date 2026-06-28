@@ -1,10 +1,12 @@
 import type {
+  ConversationTurnView,
   TranslationSegmentView,
 } from "../features/conversation/viewModels";
 
 
 interface TwoLayerSubtitleProps {
   partialEnglish: string;
+  turns?: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
 }
 

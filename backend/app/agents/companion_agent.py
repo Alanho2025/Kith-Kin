@@ -134,9 +134,8 @@ def make_submit_response_cards(clock: Callable[[], datetime]) -> Callable[..., A
                 if isinstance(cards, list):
                     for card in cards:
                         if isinstance(card, dict):
-                            # Default gates if missing, but do not overwrite if present
-                            if card.get("requires_guardian_approval") is None:
-                                card["requires_guardian_approval"] = True
+                            # Outward cards must always pass through Guardian review.
+                            card["requires_guardian_approval"] = True
                             if card.get("requires_parent_confirmation") is None:
                                 card["requires_parent_confirmation"] = True
 
@@ -292,8 +291,8 @@ class CompanionAgent(Agent):
             The proposed card set.
         """
         # 1. Warm profile and recall summaries
-        meds = []
-        allergies = []
+        meds: list[str] = []
+        allergies: list[str] = []
         if mcp_adapter is not None:
             profile_res = await mcp_adapter.memory_search("profile", ("profile",))
             if profile_res.ok and profile_res.data:
@@ -301,9 +300,9 @@ class CompanionAgent(Agent):
                     val = record.value
                     record_type = val.get("record_type")
                     content = val.get("content")
-                    if record_type == "medication" and content:
+                    if record_type == "medication" and isinstance(content, str):
                         meds.append(content)
-                    elif record_type == "allergy" and content:
+                    elif record_type == "allergy" and isinstance(content, str):
                         allergies.append(content)
                     else:
                         if isinstance(content, str):

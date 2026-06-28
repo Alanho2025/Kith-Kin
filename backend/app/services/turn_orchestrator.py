@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from google.adk.events import Event
@@ -55,11 +55,15 @@ INTERACTION_DRUG_NAMES: frozenset[str] = frozenset(
 class RouterPort(Protocol):
     async def route(self, event: TranscriptFinalEvent) -> RouteDecision: ...
 
+    def clone(self) -> Any: ...
+
 
 class GuardianPort(Protocol):
     async def review_turn(self, event: TranscriptFinalEvent) -> GuardianDecision: ...
 
     async def review_cards(self, card_set: CardSet) -> GuardianDecision: ...
+
+    def clone(self) -> Any: ...
 
 
 class CompanionPort(Protocol):
@@ -369,7 +373,7 @@ class TurnOrchestrator:
                 card_review = await self._guardian.review_cards(proposal.card_set)
                 session.state["card_review"] = card_review.model_dump(mode="json")
                 try:
-                    await session_service.update_session(session)
+                    await cast(Any, session_service).update_session(session)
                 except Exception:
                     pass
             else:

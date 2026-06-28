@@ -6,7 +6,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     // 重新 Seed 數據庫確保數據一致性，並在 backend/kithkin.db 寫入 Demo 資料
     console.log("正在重新 Seed 後端數據庫...");
     execSync(
-      "python -m scripts.seed_demo_data --database-url sqlite+aiosqlite:///backend/kithkin.db",
+      "backend/.venv/bin/python -m scripts.seed_demo_data --database-url sqlite+aiosqlite:///backend/kithkin.db",
       {
         cwd: "../",
         stdio: "inherit",
@@ -33,7 +33,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     await expect(statusBar).toContainText("KK 正在聆听", { timeout: 20000 });
 
     // 獲取測試輸入框與發送按鈕
-    const testInput = page.getByPlaceholder(/测试输入：模拟药剂师的英文发言/);
+    const testInput = page.getByPlaceholder(/語音無效時的替代文字輸入|语音无效时的替代文字输入/);
     const sendBtn = page.getByRole("button", { name: "发送" });
 
     // --- 第一輪對話：確認過敏記錄 ---
@@ -46,6 +46,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
       .locator('button:has-text("Penicillin")')
       .or(page.locator('button:has-text("allergy")'))
       .or(page.locator('button:has-text("过敏")'))
+      .or(page.locator('button:has-text("過敏")'))
       .first();
     await expect(penicillinCard).toBeVisible({ timeout: 20000 });
     await penicillinCard.click();
@@ -71,6 +72,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
       .locator('button:has-text("Lisinopril")')
       .or(page.locator('button:has-text("medications")'))
       .or(page.locator('button:has-text("用药")'))
+      .or(page.locator('button:has-text("用藥")'))
       .first();
     await expect(lisinoprilCard).toBeVisible({ timeout: 20000 });
     await lisinoprilCard.click();
@@ -92,6 +94,8 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     // 尋找包含警告、衝突或 Ibuprofen 的卡片
     const conflictCard = page
       .locator('button:has-text("conflict")')
+      .or(page.locator('button:has-text("冲突")'))
+      .or(page.locator('button:has-text("衝突")'))
       .or(page.locator('button:has-text("Ibuprofen")'))
       .first();
     await expect(conflictCard).toBeVisible({ timeout: 20000 });
