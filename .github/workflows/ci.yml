@@ -1,0 +1,70 @@
+name: CI
+
+# 第一层(offline-gates):每个 PR / 每次 push 到 main 自动跑,0 token、不调用 Gemini。
+# 第二层(live-eval):只在手动点 "Run workflow" 时跑,会真机调用 Gemini,保护配额。
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  # ---------- 免费离线门:每个 PR 自动跑 ----------
+  offline-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --frozen
+
+      # 硬门:过不了就拦下 PR
+      - name: Secret / privilege scan
+        working-directory: backend
+        run: uv run python ../scripts/check_no_secrets.py
+
+      - name: Pytest (backend)
+        working-directory: backend
+        run: uv run pytest -q -p no:cacheprovider
+
+      - name: Eval contract (offline, enforces 15 cases)
+        working-directory: backend
+        run: uv run python -m pytest ../evals/test_runner.py -q
+
+      # 软门:只报告不拦(main 当前本就有少量 ruff/mypy 历史问题,团队不强制)
+      - name: Ruff (informational)
+        continue-on-error: true
+        working-directory: backend
+        run: uv run ruff check app/ ../evals/
+
+      - name: Mypy (informational)
+        continue-on-error: true
+        working-directory: backend
+        run: uv run mypy app/
+
+  # ---------- 真机 eval 门:仅手动触发 ----------
+  live-eval:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Real Gemini eval gate (15 cases)
+        working-directory: backend
+        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
