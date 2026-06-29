@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -71,7 +72,7 @@ class CapturingWebSocket:
 
 
 @pytest.fixture
-def live_app_client() -> TestClient:
+def live_app_client(tmp_path: Path) -> TestClient:
     clock = MutableClock()
     settings = Settings(
         environment="test",
@@ -80,6 +81,7 @@ def live_app_client() -> TestClient:
         app_ws_cookie_secure=False,
         live_transport="gemini_live",
         google_api_key="test_api_key",
+        test_database_url=f"sqlite+aiosqlite:///{tmp_path / 'live.db'}",
     )
 
     app = create_app(settings=settings, clock=clock.now)

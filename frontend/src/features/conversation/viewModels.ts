@@ -63,6 +63,18 @@ export interface ConfirmationView {
   card: ResponseCardView;
 }
 
+export interface CardActionTrailEntry {
+  eventId: string;
+  eventType: string;
+  timestamp: string;
+  confirmationId: string | null;
+  cardSetId: string | null;
+  cardId: string | null;
+  actionType: CardActionTypeView | null;
+  phase: string | null;
+  replayed: boolean | null;
+}
+
 export interface GuardianWarningView {
   warningId: string;
   type: "privacy" | "payment" | "identity" | "medical" | "family" | "unknown";
@@ -93,6 +105,7 @@ export interface ConversationState {
   turns: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
   activeCardSet: CardSetView | null;
+  actions: readonly CardActionTrailEntry[];
   productOptions: readonly ProductOptionView[];
   confirmation: ConfirmationView | null;
   guardianWarning: GuardianWarningView | null;

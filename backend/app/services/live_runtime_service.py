@@ -3,7 +3,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -20,8 +20,14 @@ from app.adapters.provider_schemas import (
     ProviderTranscriptEvent,
     TranslationRequest,
 )
-from app.core.constants import SCHEMA_VERSION, CardActionType, GuardianDecisionType
+from app.core.constants import (
+    SCHEMA_VERSION,
+    CardActionType,
+    CardRiskLevel,
+    GuardianDecisionType,
+)
 from app.domain.credentials import TrustedRequestContext
+from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
 from app.schemas.runtime_events import (
     AudioSpeakerChangedEvent,
     CardConfirmEvent,
@@ -89,6 +95,8 @@ class LiveRuntimeService:
         self._completion_service = completion_service
         self._buffers: dict[UUID, list[dict[str, object]]] = {}
         self._speech_sessions: set[UUID] = set()
+        self._speech_audio_seen: set[UUID] = set()
+        self._active_speech_actions: dict[UUID, tuple[str, CardActionType]] = {}
         self._paused_sessions: set[UUID] = set()
         self._last_spoken_text: dict[UUID, str] = {}
         self._speaker_sessions: dict[UUID, Literal["parent", "pharmacist"]] = {}
@@ -97,6 +105,8 @@ class LiveRuntimeService:
     def discard_session(self, session_id: UUID) -> None:
         self._buffers.pop(session_id, None)
         self._speech_sessions.discard(session_id)
+        self._speech_audio_seen.discard(session_id)
+        self._active_speech_actions.pop(session_id, None)
         self._paused_sessions.discard(session_id)
         self._last_spoken_text.pop(session_id, None)
         self._speaker_sessions.pop(session_id, None)
@@ -165,7 +175,11 @@ class LiveRuntimeService:
     ) -> tuple[dict[str, object], ...]:
         """Append normalised provider events to the replay buffer."""
         if isinstance(provider_event, ProviderTranscriptEvent):
-            return await self._handle_transcript_provider_event(session_id, provider_event)
+            return await self._handle_transcript_provider_event(
+                session_id,
+                provider_event,
+                apply_speaker_override=True,
+            )
         if isinstance(provider_event, ProviderErrorEvent):
             return (
                 self._append_event(
@@ -228,10 +242,25 @@ class LiveRuntimeService:
                 revision=event.payload.revision,
             )
             provider_outcomes = await self._handle_transcript_provider_event(
-                session_id, provider_event
+                session_id,
+                provider_event,
+                apply_speaker_override=False,
+                include_turn_outcome=False,
             )
             for provider_outcome in provider_outcomes:
                 await websocket.send_json(provider_outcome)
+            transcript = next(
+                (
+                    outcome
+                    for outcome in provider_outcomes
+                    if outcome.get("event_type") == "transcript.final"
+                ),
+                None,
+            )
+            if transcript is not None and not _is_identity_request(provider_event.text.lower()):
+                asyncio.create_task(
+                    self._send_turn_outcome(websocket, session_id, transcript)
+                )
             return
         if self._command_service is not None:
             from app.schemas.runtime_events import (
@@ -326,9 +355,21 @@ class LiveRuntimeService:
         self,
         session_id: UUID,
         provider_event: ProviderTranscriptEvent,
+        *,
+        apply_speaker_override: bool = True,
+        include_turn_outcome: bool = True,
     ) -> tuple[dict[str, object], ...]:
+        if provider_event.utterance_id != "turn_complete" and _is_provider_thought_text(
+            provider_event.text
+        ):
+            return ()
+
         active_speaker = self._speaker_sessions.get(session_id)
-        if active_speaker is not None and provider_event.utterance_id != "turn_complete":
+        if (
+            apply_speaker_override
+            and active_speaker is not None
+            and provider_event.utterance_id != "turn_complete"
+        ):
             provider_event = replace(provider_event, speaker=active_speaker)
 
         # Filter out self-echoes of Kith & Kin's TTS spoken English
@@ -367,11 +408,32 @@ class LiveRuntimeService:
         emitted = [transcript]
         if not is_final:
             return tuple(emitted)
-        if self._translation_service is None:
-            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
-        if self._translation_service.has_seen(provider_event.utterance_id):
-            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         source_event_id = _string_field(transcript, "event_id")
+        if provider_event.speaker == "pharmacist":
+            product_snapshot = self._product_options.update(
+                str(session_id),
+                provider_event.text,
+            )
+            if product_snapshot is not None:
+                emitted.append(
+                    self._append_event(
+                        session_id,
+                        "product.options.render",
+                        product_snapshot,
+                        correlation_id=source_event_id,
+                    )
+                )
+            if not include_turn_outcome and _is_identity_request(provider_event.text.lower()):
+                event = TranscriptFinalEvent.model_validate(transcript)
+                self._append_identity_cards(session_id, event, emitted)
+        if self._translation_service is None:
+            if include_turn_outcome:
+                return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+            return tuple(emitted)
+        if self._translation_service.has_seen(provider_event.utterance_id):
+            if include_turn_outcome:
+                return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+            return tuple(emitted)
         segment_id = f"seg_{provider_event.utterance_id}"
         emitted.append(
             self._append_event(
@@ -412,21 +474,9 @@ class LiveRuntimeService:
                     correlation_id=source_event_id,
                 )
             )
-            if provider_event.speaker == "pharmacist":
-                product_snapshot = self._product_options.update(
-                    str(session_id),
-                    provider_event.text,
-                )
-                if product_snapshot is not None:
-                    emitted.append(
-                        self._append_event(
-                            session_id,
-                            "product.options.render",
-                            product_snapshot,
-                            correlation_id=source_event_id,
-                        )
-                    )
-            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+            if include_turn_outcome:
+                return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+            return tuple(emitted)
         fallback = result.fallback
         assert fallback is not None
         emitted.append(
@@ -444,7 +494,47 @@ class LiveRuntimeService:
                 correlation_id=source_event_id,
             )
         )
-        return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+        if include_turn_outcome:
+            return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
+        return tuple(emitted)
+
+    async def _send_turn_outcome(
+        self,
+        websocket: WebSocket,
+        session_id: UUID,
+        transcript: dict[str, object],
+    ) -> None:
+        try:
+            outcomes = await self._append_turn_outcome(session_id, transcript, [])
+            for outcome in outcomes:
+                await websocket.send_json(outcome)
+        except Exception:
+            logger.warning("Background turn outcome failed", exc_info=True)
+
+    def _append_identity_cards(
+        self,
+        session_id: UUID,
+        event: TranscriptFinalEvent,
+        emitted: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        card_set = self._identity_card_set(event)
+        self._cards.register_card_set(
+            card_set,
+            TrustedRequestContext(
+                session_id=session_id,
+                user_id=self._user_id,
+                origin="runtime",
+            ),
+        )
+        emitted.append(
+            self._append_event(
+                session_id,
+                "cards.render",
+                {"card_set": card_set.model_dump(mode="json")},
+                correlation_id=event.event_id,
+            )
+        )
+        return emitted
 
     async def _append_turn_outcome(
         self,
@@ -457,6 +547,8 @@ class LiveRuntimeService:
         event = TranscriptFinalEvent.model_validate(transcript)
         if event.payload.speaker != "pharmacist":
             return emitted
+        if _is_identity_request(event.payload.text.lower()):
+            return self._append_identity_cards(session_id, event, emitted)
         try:
             outcome = await self._turn_orchestrator.process_final_turn(
                 event,
@@ -524,11 +616,44 @@ class LiveRuntimeService:
             and outcome.card_review is not None
             and outcome.card_review.decision is GuardianDecisionType.ALLOW
         ):
+            card_set = self._safe_card_set_for_turn(
+                session_id,
+                event,
+                outcome.card_proposal.card_set,
+            )
+            if card_set is None:
+                emitted.append(
+                    self._append_event(
+                        session_id,
+                        "fallback.show",
+                        {
+                            "code": "CARD_REVIEW_FAILED",
+                            "message_zh": "这组回应卡片没有通过安全检查，翻译仍在继续。",
+                            "message_en": (
+                                "These response cards did not pass safety review; "
+                                "translation continues."
+                            ),
+                            "retryable": True,
+                            "recovery_action": "return_to_listening",
+                            "related_event_id": event.event_id,
+                        },
+                        correlation_id=event.event_id,
+                    )
+                )
+                return emitted
+            self._cards.register_card_set(
+                card_set,
+                TrustedRequestContext(
+                    session_id=session_id,
+                    user_id=self._user_id,
+                    origin="runtime",
+                ),
+            )
             emitted.append(
                 self._append_event(
                     session_id,
                     "cards.render",
-                    {"card_set": outcome.card_proposal.card_set.model_dump(mode="json")},
+                    {"card_set": card_set.model_dump(mode="json")},
                     correlation_id=event.event_id,
                 )
             )
@@ -556,6 +681,115 @@ class LiveRuntimeService:
                 )
             )
         return emitted
+
+    def _safe_card_set_for_turn(
+        self,
+        session_id: UUID,
+        event: TranscriptFinalEvent,
+        card_set: CardSet,
+    ) -> CardSet | None:
+        latest = event.payload.text.lower()
+        card_text = " ".join(
+            f"{card.zh_text} {card.en_text} {card.speak_zh or ''}" for card in card_set.cards
+        ).lower()
+        if _is_identity_request(latest):
+            return self._identity_card_set(event)
+        if _bundles_medication_and_allergy(card_text):
+            return self._split_health_disclosure_card_set(event, card_text)
+        if any(_is_meta_card_text(f"{card.zh_text} {card.en_text}") for card in card_set.cards):
+            return None
+        return card_set
+
+    def _identity_card_set(self, event: TranscriptFinalEvent) -> CardSet:
+        now = self._clock()
+        return CardSet(
+            card_set_id=f"cards-identity-{uuid4()}",
+            revision=1,
+            source_event_id=event.event_id,
+            generated_at=now,
+            expires_at=now + timedelta(minutes=15),
+            cards=(
+                ResponseCard(
+                    card_id=f"card-identity-repeat-{uuid4()}",
+                    card_type=CardType.ASK_QUESTION,
+                    zh_text="请药师重复需要我确认的姓名和生日。",
+                    en_text="Could you please repeat the name and birthday you need me to confirm?",
+                    speak_zh="请您重复需要我确认的姓名和生日。",
+                    risk_level=CardRiskLevel.NORMAL,
+                    action=CardAction(type=CardActionType.SPEAK),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id="guardian_identity_grounding",
+                ),
+                ResponseCard(
+                    card_id=f"card-identity-write-{uuid4()}",
+                    card_type=CardType.ASK_TO_WRITE_DOWN,
+                    zh_text="请药师把要核对的姓名和生日写下来。",
+                    en_text=(
+                        "Could you please write down the name and birthday "
+                        "you need me to check?"
+                    ),
+                    speak_zh="请您写下需要我核对的姓名和生日。",
+                    risk_level=CardRiskLevel.NORMAL,
+                    action=CardAction(type=CardActionType.SPEAK),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id="guardian_identity_grounding",
+                ),
+            ),
+        )
+
+    def _split_health_disclosure_card_set(
+        self,
+        event: TranscriptFinalEvent,
+        card_text: str,
+    ) -> CardSet:
+        now = self._clock()
+        medication = (
+            "Lisinopril"
+            if "lisinopril" in card_text
+            else "my recorded blood pressure medicine"
+        )
+        allergy = "Penicillin" if "penicillin" in card_text else "my recorded allergy"
+        return CardSet(
+            card_set_id=f"cards-health-split-{uuid4()}",
+            revision=1,
+            source_event_id=event.event_id,
+            generated_at=now,
+            expires_at=now + timedelta(minutes=15),
+            cards=(
+                ResponseCard(
+                    card_id=f"card-medication-{uuid4()}",
+                    card_type=CardType.CONFIRM_INFO,
+                    zh_text=f"我有记录正在用{medication}，请药师核对是否相关。",
+                    en_text=(
+                        f"I have a record that I take {medication}. "
+                        "Could you please check whether that matters for these options?"
+                    ),
+                    speak_zh=f"我有记录正在用{medication}。请您核对这是否和这些选择有关。",
+                    risk_level=CardRiskLevel.MEDICAL,
+                    action=CardAction(type=CardActionType.SPEAK),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id="guardian_split_health_disclosure",
+                ),
+                ResponseCard(
+                    card_id=f"card-allergy-{uuid4()}",
+                    card_type=CardType.CONFIRM_INFO,
+                    zh_text=f"我有记录对{allergy}过敏，请药师核对是否相关。",
+                    en_text=(
+                        f"I have a recorded {allergy} allergy. "
+                        "Could you please check whether that matters for these options?"
+                    ),
+                    speak_zh=f"我有记录对{allergy}过敏。请您核对这是否和这些选择有关。",
+                    risk_level=CardRiskLevel.MEDICAL,
+                    action=CardAction(type=CardActionType.SPEAK),
+                    requires_parent_confirmation=True,
+                    requires_guardian_approval=True,
+                    guardian_decision_id="guardian_split_health_disclosure",
+                ),
+            ),
+        )
 
     @staticmethod
     def _sequence(event: dict[str, object]) -> int:
@@ -755,21 +989,8 @@ class LiveRuntimeService:
             if isinstance(event, ProviderAudioEvent):
                 if session_id not in self._speech_sessions:
                     continue
-                if not model_speaking:
-                    model_speaking = True
-                    muted_evt = self._append_event(
-                        session_id,
-                        "audio.muted",
-                        {"muted": True, "reason": "tts_playback"},
-                    )
-                    await websocket.send_json(muted_evt)
-
-                    speaking_evt = self._append_event(
-                        session_id,
-                        "audio.speaking",
-                        {"phase": "started"},
-                    )
-                    await websocket.send_json(speaking_evt)
+                model_speaking = True
+                self._speech_audio_seen.add(session_id)
                 await websocket.send_bytes(event.audio)
             elif isinstance(event, ProviderTranscriptEvent):
                 if session_id in self._paused_sessions:
@@ -796,15 +1017,46 @@ class LiveRuntimeService:
                         for out in outcomes:
                             await websocket.send_json(out)
                 elif event.utterance_id == "turn_complete":
-                    if model_speaking or session_id in self._speech_sessions:
+                    if session_id in self._speech_sessions:
+                        action = self._active_speech_actions.get(session_id)
+                        saw_audio = session_id in self._speech_audio_seen
                         model_speaking = False
                         self._speech_sessions.discard(session_id)
-                        speaking_evt = self._append_event(
-                            session_id,
-                            "audio.speaking",
-                            {"phase": "completed"},
-                        )
-                        await websocket.send_json(speaking_evt)
+                        self._speech_audio_seen.discard(session_id)
+                        self._active_speech_actions.pop(session_id, None)
+                        if saw_audio:
+                            speaking_evt = self._append_event(
+                                session_id,
+                                "audio.speaking",
+                                {"phase": "completed"},
+                            )
+                            await websocket.send_json(speaking_evt)
+                            if action is not None:
+                                confirmation_id, action_type = action
+                                status_evt = self._append_event(
+                                    session_id,
+                                    "card.action.status",
+                                    {
+                                        "confirmation_id": confirmation_id,
+                                        "action_type": action_type.value,
+                                        "phase": "succeeded",
+                                        "code": None,
+                                    },
+                                )
+                                await websocket.send_json(status_evt)
+                        elif action is not None:
+                            confirmation_id, action_type = action
+                            failed_evt = self._append_event(
+                                session_id,
+                                "card.action.status",
+                                {
+                                    "confirmation_id": confirmation_id,
+                                    "action_type": action_type.value,
+                                    "phase": "failed",
+                                    "code": "AUDIO_DELIVERY_FAILED",
+                                },
+                            )
+                            await websocket.send_json(failed_evt)
 
                         muted_evt = self._append_event(
                             session_id,
@@ -827,6 +1079,8 @@ class LiveRuntimeService:
                     if is_final and model_speaking:
                         model_speaking = False
                         self._speech_sessions.discard(session_id)
+                        self._speech_audio_seen.discard(session_id)
+                        self._active_speech_actions.pop(session_id, None)
                         speaking_evt = self._append_event(
                             session_id,
                             "audio.speaking",
@@ -875,10 +1129,25 @@ class LiveRuntimeService:
                 revision=event.payload.revision,
             )
             provider_outcomes = await self._handle_transcript_provider_event(
-                session_id, provider_event
+                session_id,
+                provider_event,
+                apply_speaker_override=False,
+                include_turn_outcome=False,
             )
             for provider_outcome in provider_outcomes:
                 await websocket.send_json(provider_outcome)
+            transcript = next(
+                (
+                    outcome
+                    for outcome in provider_outcomes
+                    if outcome.get("event_type") == "transcript.final"
+                ),
+                None,
+            )
+            if transcript is not None:
+                asyncio.create_task(
+                    self._send_turn_outcome(websocket, session_id, transcript)
+                )
             return
 
         if self._command_service is not None and not isinstance(event, CardConfirmEvent):
@@ -910,6 +1179,7 @@ class LiveRuntimeService:
                 )
                 await websocket.send_json(speaking_evt)
                 self._speech_sessions.add(session_id)
+                self._speech_audio_seen.discard(session_id)
                 self._last_spoken_text[session_id] = repeat_text
                 await port.send_text(repeat_text)
 
@@ -1030,7 +1300,24 @@ class LiveRuntimeService:
                 )
                 await websocket.send_json(speaking_evt)
                 self._speech_sessions.add(session_id)
+                self._speech_audio_seen.discard(session_id)
+                self._active_speech_actions[session_id] = (
+                    confirmation_outcome.confirmation_id,
+                    confirmation_outcome.action_type,
+                )
                 self._last_spoken_text[session_id] = card.en_text
+                started_evt = self._append_event(
+                    session_id,
+                    "card.action.status",
+                    {
+                        "confirmation_id": confirmation_outcome.confirmation_id,
+                        "action_type": confirmation_outcome.action_type.value,
+                        "phase": "started",
+                        "code": None,
+                    },
+                    correlation_id=event.event_id,
+                )
+                await websocket.send_json(started_evt)
                 await port.send_text(card.en_text)
 
 
@@ -1039,3 +1326,49 @@ def _string_field(event: dict[str, Any], field: str) -> str:
     if not isinstance(value, str):
         raise RuntimeError("RUNTIME_EVENT_FIELD_INVALID")
     return value
+
+
+def _is_provider_thought_text(text: str) -> bool:
+    normalized = " ".join(text.strip().split()).lower()
+    if not normalized:
+        return True
+    return normalized.startswith(
+        (
+            "**analyzing",
+            "**awaiting",
+            "**interpreting",
+            "analyzing the role-play",
+            "awaiting further input",
+            "interpreting the user's speech",
+        )
+    )
+
+
+def _is_identity_request(text: str) -> bool:
+    return ("name" in text and "birthday" in text) or (
+        "name" in text and "date of birth" in text
+    )
+
+
+def _bundles_medication_and_allergy(text: str) -> bool:
+    medication_markers = ("lisinopril", "blood pressure medicine", "medication")
+    allergy_markers = ("penicillin", "allergy", "allergic")
+    return any(marker in text for marker in medication_markers) and any(
+        marker in text for marker in allergy_markers
+    )
+
+
+def _is_meta_card_text(text: str) -> bool:
+    normalized = " ".join(text.lower().split())
+    return any(
+        marker in normalized
+        for marker in (
+            "the patient is",
+            "let kk",
+            "ask pharmacist",
+            "tell the pharmacist",
+            "让 kk",
+            "請 kk",
+            "请 kk",
+        )
+    )

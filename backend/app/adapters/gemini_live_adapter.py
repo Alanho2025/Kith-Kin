@@ -210,8 +210,6 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     if part.inline_data:
                         audio_data = part.inline_data.data
                         if audio_data:
-                            import base64
-
                             encoded = base64.b64encode(audio_data).decode("utf-8")
                             flat_msg = {
                                 "type": "audio",
@@ -220,19 +218,6 @@ class GeminiLiveSessionPort(LiveSessionPort):
                             }
                             audio_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                             await self._queue.put(audio_event)
-                    if part.text:
-                        flat_msg = {
-                            "type": "input_transcription",
-                            "event_id": f"evt_{uuid4()}",
-                            "utterance_id": f"utt_{uuid4()}",
-                            "speaker": "parent",
-                            "language": "en",
-                            "text": part.text,
-                            "revision": 1,
-                            "final": True,
-                        }
-                        transcript_event = GeminiLiveAdapter.map_provider_message(flat_msg)
-                        await self._queue.put(transcript_event)
             if content.turn_complete:
                 flat_msg = {
                     "type": "input_transcription",

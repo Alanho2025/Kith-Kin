@@ -20,6 +20,7 @@ export const initialConversationState: ConversationState = {
   turns: [],
   chineseSegments: [],
   activeCardSet: null,
+  actions: [],
   productOptions: [],
   confirmation: null,
   guardianWarning: null,
@@ -32,6 +33,16 @@ export const initialConversationState: ConversationState = {
 export type ConversationAction =
   | ConversationRuntimeEvent
   | { type: "dismiss_confirmation" };
+
+function actionTypeView(value: unknown): CardActionTypeView | null {
+  return value === "speak" ||
+    value === "show_to_pharmacist" ||
+    value === "save_memory" ||
+    value === "notify_family" ||
+    value === "no_action"
+    ? value
+    : null;
+}
 
 function recordEvent(
   state: ConversationState,
@@ -84,7 +95,25 @@ export function conversationReducer(
   event: ConversationAction,
 ): ConversationState {
   if ("type" in event) {
-    return { ...state, status: "listening", confirmation: null };
+    const action = state.confirmation
+      ? {
+          eventId: `local-dismiss-${state.confirmation.confirmationId}`,
+          eventType: "card.cancel",
+          timestamp: "",
+          confirmationId: state.confirmation.confirmationId,
+          cardSetId: state.confirmation.cardSetId,
+          cardId: state.confirmation.card.cardId,
+          actionType: state.confirmation.card.actionType,
+          phase: "cancelled",
+          replayed: null,
+        }
+      : null;
+    return {
+      ...state,
+      status: "listening",
+      confirmation: null,
+      actions: action ? [...state.actions, action] : state.actions,
+    };
   }
   if (state.seenEventIds.has(event.eventId)) {
     return state;
@@ -150,7 +179,15 @@ export function conversationReducer(
         activeUtteranceId: payload.sourceTranscriptEventId ?? null,
       });
     }
-    case "route.decision":
+    case "route.decision": {
+      const payload = event.payload as { routeType?: string; route_type?: string };
+      return recordEvent(state, event, {
+        status:
+          (payload.routeType ?? payload.route_type) === "passive_translation"
+            ? "listening"
+            : "checking",
+      });
+    }
     case "tool.status":
       return recordEvent(state, event, { status: "checking" });
     case "cards.render": {
@@ -213,27 +250,81 @@ export function conversationReducer(
             card,
           }
         : null;
-      return recordEvent(state, event, { status: "needs_confirmation", confirmation });
+      const action = {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+        confirmationId: payload.confirmationId,
+        cardSetId: payload.cardSetId,
+        cardId: payload.cardId,
+        actionType: card?.actionType ?? null,
+        phase: "selected",
+        replayed: null,
+      };
+      return recordEvent(state, event, {
+        status: "needs_confirmation",
+        confirmation,
+        actions: [...state.actions, action],
+      });
     }
     case "card.confirmed": {
-      const confirmedCard = state.confirmation?.card;
-      const turns = confirmedCard
-        ? [
-            ...state.turns,
-            {
-              utteranceId: `card-${event.eventId}`,
-              transcriptEventId: event.eventId,
-              speaker: "kk" as const,
-              sourceText: confirmedCard.enText,
-              translatedText: confirmedCard.speakZh || confirmedCard.zhText,
-            },
-          ]
-
-        : state.turns;
-      return recordEvent(state, event, { status: "speaking", confirmation: null, turns });
+      const payload = event.payload as {
+        confirmationId?: string;
+        confirmation_id?: string;
+        actionType?: string;
+        action_type?: string;
+        replayed?: boolean;
+      };
+      const confirmationId = payload.confirmationId ?? payload.confirmation_id ?? null;
+      const action = {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+        confirmationId,
+        cardSetId: state.confirmation?.cardSetId ?? null,
+        cardId: state.confirmation?.card.cardId ?? null,
+        actionType: actionTypeView(payload.actionType ?? payload.action_type),
+        phase: "confirmed",
+        replayed: payload.replayed ?? null,
+      };
+      return recordEvent(state, event, {
+        status: "speaking",
+        confirmation: null,
+        activeCardSet: null,
+        actions: [...state.actions, action],
+      });
     }
-    case "audio.speaking":
-      return recordEvent(state, event, { status: "speaking", confirmation: null });
+    case "card.action.status": {
+      const payload = event.payload as {
+        confirmationId?: string;
+        confirmation_id?: string;
+        actionType?: string;
+        action_type?: string;
+        phase?: string;
+      };
+      const action = {
+        eventId: event.eventId,
+        eventType: event.eventType,
+        timestamp: event.timestamp,
+        confirmationId: payload.confirmationId ?? payload.confirmation_id ?? null,
+        cardSetId: null,
+        cardId: null,
+        actionType: actionTypeView(payload.actionType ?? payload.action_type),
+        phase: payload.phase ?? null,
+        replayed: null,
+      };
+      return recordEvent(state, event, {
+        status: payload.phase === "failed" || payload.phase === "blocked" ? "error" : state.status,
+        actions: [...state.actions, action],
+      });
+    }
+    case "audio.speaking": {
+      const payload = event.payload as { phase?: string };
+      return recordEvent(state, event, {
+        status: payload.phase === "completed" || payload.phase === "interrupted" ? "listening" : "speaking",
+        confirmation: null,
+      });
+    }
     case "guardian.warning":
       return recordEvent(state, event, {
         status: "blocked",

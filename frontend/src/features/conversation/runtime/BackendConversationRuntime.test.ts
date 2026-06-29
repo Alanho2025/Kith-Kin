@@ -20,6 +20,7 @@ class FakeSocket implements RuntimeSocket {
   readonly sentBinary: ArrayBufferLike[] = [];
 
   send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+    if (this.readyState !== WebSocket.OPEN) throw new Error("SOCKET_NOT_OPEN");
     if (typeof data === "string") this.sent.push(data);
     else if (data instanceof ArrayBuffer) this.sentBinary.push(data);
   }
@@ -37,6 +38,10 @@ class FakeSocket implements RuntimeSocket {
   emitJson(value: object): void {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(value) }));
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 
@@ -146,6 +151,50 @@ describe("BackendConversationRuntime", () => {
     socket.close();
 
     await expect(connected).rejects.toThrow("RUNTIME_DISCONNECTED");
+  });
+
+  it("queues typed fallback text while the backend socket is still opening", async () => {
+    vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-queued", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-queued");
+    await Promise.resolve();
+    await runtime.sendCommand({
+      eventType: "transcript.final",
+      payload: {
+        utteranceId: "utt-queued-fallback",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Good morning. How are you today?",
+        revision: 1,
+      },
+    });
+
+    expect(socket.sent).toHaveLength(0);
+    socket.emitOpen();
+    await connected;
+
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      event_type: "transcript.final",
+      payload: {
+        utterance_id: "utt-queued-fallback",
+        speaker: "pharmacist",
+        text: "Good morning. How are you today?",
+      },
+    });
   });
 
   it("plays binary messages and handles audio.muted events", async () => {
@@ -347,14 +396,17 @@ describe("BackendConversationRuntime", () => {
     runtime.subscribe((event) => events.push(event));
 
     await expect(runtime.connect("ses-ticket-403")).resolves.toBeUndefined();
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        eventType: "error.show",
-        payload: expect.objectContaining({
-          code: "RUNTIME_TICKET_REQUEST_FAILED",
-          messageZh: expect.stringContaining("无法连接真实后端"),
-        }),
-      }),
+    const errorEvent = events.find((event) => {
+      const payload = event.payload;
+      return (
+        event.eventType === "error.show" &&
+        isRecord(payload) &&
+        payload.code === "RUNTIME_TICKET_REQUEST_FAILED"
+      );
+    });
+    const payload = errorEvent?.payload;
+    expect(isRecord(payload) ? payload.messageZh : null).toEqual(
+      expect.stringContaining("无法连接真实后端"),
     );
   });
 });

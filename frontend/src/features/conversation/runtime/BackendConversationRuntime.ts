@@ -40,6 +40,8 @@ interface BackendConversationRuntimeOptions {
   baseUrl?: string;
 }
 
+const SOCKET_OPEN = 1;
+
 type MicMode =
   | "idle"
   | "listening_to_pharmacist"
@@ -96,6 +98,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private recorderStarted = false;
   private micMode: MicMode = "idle";
   private activeSpeaker: Exclude<MicrophoneModeView, null> = "pharmacist";
+  private connecting = false;
+  private readonly pendingCommandFrames: string[] = [];
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
     this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
@@ -106,11 +110,44 @@ export class BackendConversationRuntime implements ConversationRuntime {
   async connect(sessionId: string): Promise<void> {
     const generation = ++this.connectionGeneration;
     this.sessionId = sessionId;
-    const response = await this.fetchFn(
-      `${this.baseUrl}/api/sessions/${sessionId}/ticket`,
-      { method: "POST", credentials: "include" },
-    );
-    if (!response.ok) throw new Error("RUNTIME_TICKET_REQUEST_FAILED");
+    this.connecting = true;
+    let response: Response;
+    try {
+      response = await this.fetchFn(
+        `${this.baseUrl}/api/sessions/${sessionId}/ticket`,
+        { method: "POST", credentials: "include" },
+      );
+    } catch (error) {
+      if (generation === this.connectionGeneration) {
+        this.connecting = false;
+        this.pendingCommandFrames.length = 0;
+      }
+      throw error;
+    }
+    if (!response.ok) {
+      if (generation === this.connectionGeneration) {
+        this.connecting = false;
+        this.pendingCommandFrames.length = 0;
+        this.emit({
+          schemaVersion: "0.1",
+          eventId: `runtime-ticket-${crypto.randomUUID()}`,
+          eventType: "error.show",
+          sessionId,
+          sequence: this.sequence++,
+          timestamp: new Date().toISOString(),
+          correlationId: null,
+          payload: {
+            code: "RUNTIME_TICKET_REQUEST_FAILED",
+            messageZh: "无法连接真实后端，请检查本地服务与授权来源。",
+            messageEn: "Unable to connect to the real backend.",
+            retryable: true,
+            recoveryAction: "reconnect",
+            relatedEventId: null,
+          },
+        });
+      }
+      return;
+    }
     if (generation !== this.connectionGeneration) return;
     const websocketBase = this.baseUrl.replace(/^http/, "ws");
     const socket = this.socketFactory(`${websocketBase}/api/sessions/${sessionId}/live`);
@@ -123,19 +160,29 @@ export class BackendConversationRuntime implements ConversationRuntime {
 
     this.audioRecorder = new AudioRecorder();
 
-    await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => {
-        socket.onclose = null;
-        resolve();
-      };
-      socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
-      socket.onclose = () => reject(new Error("RUNTIME_DISCONNECTED"));
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.onopen = () => {
+          socket.onclose = null;
+          resolve();
+        };
+        socket.onerror = () => reject(new Error("RUNTIME_DISCONNECTED"));
+        socket.onclose = () => reject(new Error("RUNTIME_DISCONNECTED"));
+      });
+    } catch (error) {
+      if (generation === this.connectionGeneration) {
+        this.connecting = false;
+        this.pendingCommandFrames.length = 0;
+      }
+      throw error;
+    }
 
     if (generation !== this.connectionGeneration) {
       socket.close();
       return;
     }
+    this.connecting = false;
+    this.flushPendingCommandFrames();
     this.updateRecorderGate();
   }
 
@@ -152,6 +199,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
     this.userMicEnabled = false;
     this.micMode = "idle";
     this.activeSpeaker = "pharmacist";
+    this.connecting = false;
+    this.pendingCommandFrames.length = 0;
     return Promise.resolve();
   }
 
@@ -172,7 +221,10 @@ export class BackendConversationRuntime implements ConversationRuntime {
   }
 
   sendCommand(command: RuntimeCommandView): Promise<void> {
-    if (!this.socket) return Promise.reject(new Error("RUNTIME_DISCONNECTED"));
+    if (!this.sessionId) return Promise.reject(new Error("RUNTIME_DISCONNECTED"));
+    if (command.eventType === "transcript.final") {
+      this.pauseMicrophoneForTypedFallback();
+    }
     const envelope = {
       schema_version: "0.1",
       event_id: `client-${crypto.randomUUID()}`,
@@ -183,8 +235,22 @@ export class BackendConversationRuntime implements ConversationRuntime {
       correlation_id: null,
       payload: snakeCase(command.payload),
     };
-    this.socket.send(JSON.stringify(envelope));
-    return Promise.resolve();
+    const frame = JSON.stringify(envelope);
+    if (this.socket?.readyState === SOCKET_OPEN) {
+      this.socket.send(frame);
+      return Promise.resolve();
+    }
+    if (this.connecting) {
+      this.pendingCommandFrames.push(frame);
+      return Promise.resolve();
+    }
+    return Promise.reject(new Error("RUNTIME_DISCONNECTED"));
+  }
+
+  private flushPendingCommandFrames(): void {
+    if (!this.socket || this.socket.readyState !== SOCKET_OPEN) return;
+    const frames = this.pendingCommandFrames.splice(0);
+    for (const frame of frames) this.socket.send(frame);
   }
 
   subscribe(listener: (event: ConversationRuntimeEvent) => void): () => void {
@@ -233,7 +299,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
       }
     }
 
-    for (const listener of this.listeners) listener(event);
+    this.emit(event);
   }
 
   private updateRecorderGate(): void {
@@ -242,7 +308,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
     const wantsAudio =
       this.userMicEnabled &&
       !this.backendMuted &&
-      socket.readyState === WebSocket.OPEN &&
+      socket.readyState === SOCKET_OPEN &&
       this.micMode !== "system_speaking" &&
       this.micMode !== "error";
 
@@ -269,7 +335,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
   }
 
   private getAudioGate(): AudioGate {
-    const websocketReady = this.socket?.readyState === WebSocket.OPEN;
+    const websocketReady = this.socket?.readyState === SOCKET_OPEN;
     const recorderReady = this.recorderStarted;
     return {
       userMicEnabled: this.userMicEnabled,
@@ -286,8 +352,19 @@ export class BackendConversationRuntime implements ConversationRuntime {
     };
   }
 
+  private pauseMicrophoneForTypedFallback(): void {
+    this.userMicEnabled = false;
+    this.micMode = "paused";
+    this.audioRecorder?.pause();
+  }
+
+  private emit(event: ConversationRuntimeEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
   private sendSpeakerChanged(speaker: Exclude<MicrophoneModeView, null>): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-    this.sendCommand({ eventType: "audio.speaker_changed", payload: { speaker } });
+    void this.sendCommand({ eventType: "audio.speaker_changed", payload: { speaker } }).catch(
+      () => {},
+    );
   }
 }

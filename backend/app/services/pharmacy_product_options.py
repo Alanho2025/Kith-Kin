@@ -73,6 +73,16 @@ def _parse_three_option_names(text: str) -> list[str]:
     if "three options" not in lowered:
         return []
 
+    natural_names = [
+        match.group("name").strip()
+        for match in re.finditer(
+            r"\b(?P<name>[A-Z][A-Za-z]*(?:\s+(?:gel|cream|tablet|tablets|capsule|capsules|syrup|spray))?)\s+costs\s+",
+            text,
+        )
+    ]
+    if len(natural_names) >= 3:
+        return natural_names[:3]
+
     colon_match = re.search(r"three options:\s*(.+?)(?:\.|$)", text, flags=re.IGNORECASE)
     if colon_match:
         segment = colon_match.group(1)
@@ -105,6 +115,32 @@ def _apply_detail_sentences(options: list[dict[str, str | None]], text: str) -> 
         for option in options:
             name = str(option["name"])
             name_lower = name.lower()
+            natural = re.search(
+                rf"\b{re.escape(name)}\s+costs\s+"
+                r"(?P<price>\d+(?:\.\d{1,2})?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)"
+                r"\s+dollars?\s+and\s+is\s+for\s+(?P<detail>.+)$",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            if natural:
+                price = f"{_number_word_to_digits(natural.group('price'))} dollars"
+                if option["price"] != price:
+                    option["price"] = price
+                    changed = True
+                detail = natural.group("detail").strip(" .")
+                caution = None
+                if ";" in detail:
+                    detail, caution = [part.strip(" .") for part in detail.split(";", maxsplit=1)]
+                if ", but " in detail.lower():
+                    parts = re.split(r",\s+but\s+", detail, maxsplit=1, flags=re.IGNORECASE)
+                    detail = parts[0].strip(" .")
+                    caution = parts[1].strip(" .")
+                if detail and option["pharmacist_stated_use"] != detail:
+                    option["pharmacist_stated_use"] = detail
+                    changed = True
+                if caution and option["pharmacist_stated_cautions"] != caution:
+                    option["pharmacist_stated_cautions"] = caution
+                    changed = True
             prefix = f"{name_lower} is "
             directions_prefix = f"{name_lower} directions are "
             article_prefix = f"the {name_lower} "
@@ -148,14 +184,45 @@ def _apply_detail_sentences(options: list[dict[str, str | None]], text: str) -> 
 
 def _apply_prices(options: list[dict[str, str | None]], text: str) -> bool:
     lowered = text.lower()
-    if "price" not in lowered:
+    if "price" not in lowered and "costs" not in lowered:
         return False
-    prices = re.findall(r"\b\d+(?:\.\d{1,2})?\s+dollars\b", lowered)
+    prices = re.findall(
+        r"\b(?:\d+(?:\.\d{1,2})?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+dollars\b",
+        lowered,
+    )
     if len(prices) < len(options):
         return False
     changed = False
     for option, price in zip(options, prices, strict=False):
+        amount = price.split()[0]
+        price = f"{_number_word_to_digits(amount)} dollars"
         if option["price"] != price:
             option["price"] = price
             changed = True
     return changed
+
+
+def _number_word_to_digits(value: str) -> str:
+    words = {
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+        "ten": "10",
+        "eleven": "11",
+        "twelve": "12",
+        "thirteen": "13",
+        "fourteen": "14",
+        "fifteen": "15",
+        "sixteen": "16",
+        "seventeen": "17",
+        "eighteen": "18",
+        "nineteen": "19",
+        "twenty": "20",
+    }
+    return words.get(value.lower(), value)

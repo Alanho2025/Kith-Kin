@@ -94,9 +94,9 @@ def runtime(
         user_id=USER_ID if turn_orchestrator is not None else None,
     )
     if with_completion_service:
-        from app.services.visit_summary_service import VisitSummaryService
         from app.adapters.notification_adapter import NotificationAdapter
         from app.services.notification_service import NotificationService
+        from app.services.visit_summary_service import VisitSummaryService
 
         visit_summary_service = VisitSummaryService()
         notification_adapter = NotificationAdapter()
@@ -168,6 +168,31 @@ class StaticCardOrchestrator:
     async def process_final_turn(self, event, context, conversation_context=None):
         self.contexts.append(conversation_context)
         return self.outcome
+
+
+class BlockingOrchestrator:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def process_final_turn(self, event, context, conversation_context=None):
+        self.started.set()
+        await self.release.wait()
+        return TurnOutcome(
+            route=RouteDecision(
+                route_type=RouteType.PASSIVE_TRANSLATION,
+                confidence=0.9,
+                reason_code=RouteReasonCode.ROUTINE_TRANSLATION,
+            ),
+            guardian=GuardianDecision(
+                guardian_decision_id="guardian-blocking",
+                decision=GuardianDecisionType.ALLOW,
+                risk_level=CardRiskLevel.NORMAL,
+                reason_code=GuardianReasonCode.SAFE_TURN,
+            ),
+            card_proposal=None,
+            card_review=None,
+        )
 
 
 def provider_transcript(*, final: bool, utterance_id: str = "utt_1") -> ProviderTranscriptEvent:
@@ -463,9 +488,10 @@ async def test_parent_speaker_mode_records_parent_transcript_without_card_genera
     assert "cards.render" not in [event["event_type"] for event in events]
 
 
-async def test_typed_fallback_pharmacist_transcript_is_not_overwritten_by_parent_mic_state() -> None:
+async def test_typed_fallback_pharmacist_transcript_is_not_overwritten_by_parent_mic_state(
+) -> None:
     gateway = CapturingTranslationGateway()
-    service = runtime(gateway, with_turn_orchestrator=True)
+    service = runtime(gateway)
     websocket = CapturingCommandWebSocket()
     port = AsyncMock()
 
@@ -515,7 +541,93 @@ async def test_typed_fallback_pharmacist_transcript_is_not_overwritten_by_parent
         event for event in websocket.json_events if event["event_type"] == "transcript.final"
     )
     assert transcript["payload"]["speaker"] == "pharmacist"
+
+
+async def test_live_typed_command_flushes_transcript_before_turn_orchestrator_finishes() -> None:
+    gateway = CapturingTranslationGateway()
+    service = runtime(gateway)
+    service._turn_orchestrator = BlockingOrchestrator()
+    service._user_id = USER_ID
+    websocket = CapturingCommandWebSocket()
+    port = AsyncMock()
+
+    await service._handle_live_command(
+        websocket,
+        SESSION_ID,
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-typed-nonblocking",
+                "event_type": "transcript.final",
+                "session_id": str(SESSION_ID),
+                "sequence": 1,
+                "timestamp": NOW.isoformat(),
+                "correlation_id": None,
+                "payload": {
+                    "utterance_id": "utt-typed-nonblocking",
+                    "speaker": "pharmacist",
+                    "language": "en",
+                    "text": "Good morning. How are you today?",
+                    "revision": 1,
+                },
+            }
+        ),
+        port,
+    )
+
+    event_types = [event["event_type"] for event in websocket.json_events]
+    assert "transcript.final" in event_types
+    assert "translation.final" in event_types
+    assert "route.decision" not in event_types
+
+    orchestrator = service._turn_orchestrator
+    assert isinstance(orchestrator, BlockingOrchestrator)
+    await asyncio.wait_for(orchestrator.started.wait(), timeout=0.5)
+    orchestrator.release.set()
+    for _ in range(20):
+        if "route.decision" in [event["event_type"] for event in websocket.json_events]:
+            break
+        await asyncio.sleep(0)
     assert "route.decision" in [event["event_type"] for event in websocket.json_events]
+
+
+async def test_live_typed_identity_command_renders_grounded_cards_immediately() -> None:
+    gateway = CapturingTranslationGateway()
+    service = runtime(gateway)
+    service._user_id = USER_ID
+    websocket = CapturingCommandWebSocket()
+    port = AsyncMock()
+
+    await service._handle_live_command(
+        websocket,
+        SESSION_ID,
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-typed-identity",
+                "event_type": "transcript.final",
+                "session_id": str(SESSION_ID),
+                "sequence": 1,
+                "timestamp": NOW.isoformat(),
+                "correlation_id": None,
+                "payload": {
+                    "utterance_id": "utt-typed-identity",
+                    "speaker": "pharmacist",
+                    "language": "en",
+                    "text": "Can you give me your birthday and name?",
+                    "revision": 1,
+                },
+            }
+        ),
+        port,
+    )
+
+    cards = next(event for event in websocket.json_events if event["event_type"] == "cards.render")
+    card_text = " ".join(
+        card["en_text"] for card in cards["payload"]["card_set"]["cards"]
+    ).lower()
+    assert "birthday" in card_text
+    assert "name" in card_text
 
 
 async def test_provider_thought_text_is_ignored_before_translation_routing_and_cards() -> None:
@@ -606,7 +718,8 @@ async def test_identity_question_cards_are_grounded_to_latest_pharmacist_request
     assert "penicillin" not in card_text
 
 
-async def test_safety_disclosure_cards_do_not_bundle_allergy_and_medication_in_one_utterance() -> None:
+async def test_safety_disclosure_cards_do_not_bundle_allergy_and_medication_in_one_utterance(
+) -> None:
     gateway = CapturingTranslationGateway()
     orchestrator = StaticCardOrchestrator(
         allowed_card_outcome(
@@ -647,7 +760,8 @@ async def test_safety_disclosure_cards_do_not_bundle_allergy_and_medication_in_o
     )
 
 
-async def test_session_end_summary_contains_natural_products_advice_and_unresolved_questions() -> None:
+async def test_session_end_summary_contains_natural_products_advice_and_unresolved_questions(
+) -> None:
     gateway = CapturingTranslationGateway()
     service = runtime(
         gateway,
@@ -865,6 +979,27 @@ async def test_translation_timeout_keeps_english() -> None:
     assert events[0]["event_type"] == "transcript.final"
     assert events[-1]["event_type"] == "fallback.show"
     assert events[-1]["payload"]["code"] == "TRANSLATION_TIMEOUT"
+
+
+async def test_product_options_render_even_when_translation_times_out() -> None:
+    gateway = CapturingTranslationGateway(delay_seconds=0.05)
+
+    events = await runtime(gateway, timeout_ms=1).handle_provider_event(
+        SESSION_ID,
+        provider_transcript_text(
+            (
+                "I can show you three options. "
+                "Panadol costs eight dollars and is for pain and fever. "
+                "Nurofen costs twelve dollars and is for inflammation. "
+                "Voltaren gel costs fifteen dollars and is for local muscle pain."
+            ),
+            utterance_id="utt-products-timeout",
+        ),
+    )
+
+    event_types = [event["event_type"] for event in events]
+    assert "product.options.render" in event_types
+    assert events[-1]["event_type"] == "fallback.show"
 
 
 async def test_disconnect_cancels_all_owned_tasks() -> None:

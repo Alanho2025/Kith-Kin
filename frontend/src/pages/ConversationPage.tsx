@@ -236,6 +236,8 @@ export function ConversationPage({
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+    setActiveMicMode(null);
+    setRuntimeMicrophoneMode(null);
     void sendCommand({
       eventType: "transcript.final",
       payload: {
@@ -280,7 +282,6 @@ export function ConversationPage({
   const showResponseCards = Boolean(
     state.activeCardSet &&
     !state.guardianWarning &&
-    filteredChineseSegments.length > 0 &&
     !isReceivingSpeech &&
     !hasConfirmation,
   );

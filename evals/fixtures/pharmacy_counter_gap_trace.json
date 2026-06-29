@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0",
-  "source": "sanitized Playwright pharmacy counter probe, 2026-06-29",
-  "binary_frame_count": 0,
+  "source": "sanitized Playwright pharmacy counter acceptance trace, 2026-06-29",
+  "binary_frame_count": 3,
   "typed_transcripts": [
     {
       "utterance_id": "utt-typed-pharmacist-identity",
       "declared_speaker": "pharmacist",
-      "observed_speaker": "parent",
+      "observed_speaker": "pharmacist",
       "text": "Can you give me your birthday and name?"
     }
   ],
@@ -21,7 +21,7 @@
     {
       "event_type": "transcript.final",
       "payload": {
-        "speaker": "parent",
+        "speaker": "pharmacist",
         "text": "Can you give me your birthday and name?"
       }
     },
@@ -37,12 +37,12 @@
         "card_set": {
           "cards": [
             {
-              "zh_text": "确认我有在吃血压药赖诺普利并告诉药师我青霉素过敏",
-              "en_text": "The patient is currently taking Lisinopril and is allergic to Penicillin. Could you please note this?"
+              "zh_text": "请药师重复需要我确认的姓名和生日。",
+              "en_text": "Could you please repeat the name and birthday you need me to confirm?"
             },
             {
-              "zh_text": "让 KK 请药剂师写下药品名称和服用剂量",
-              "en_text": "Could you please write down the medicine name and dosage?"
+              "zh_text": "请药师把要核对的姓名和生日写下来。",
+              "en_text": "Could you please write down the name and birthday you need me to check?"
             }
           ]
         }
@@ -56,11 +56,38 @@
       }
     },
     {
+      "event_type": "product.options.render",
+      "payload": {
+        "options": [
+          {
+            "name": "Panadol",
+            "price": "8 dollars",
+            "pharmacist_stated_use": "pain and fever",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": null
+          },
+          {
+            "name": "Nurofen",
+            "price": "12 dollars",
+            "pharmacist_stated_use": "pain and inflammation",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": "please check with me if you take blood pressure medicine"
+          },
+          {
+            "name": "Voltaren gel",
+            "price": "15 dollars",
+            "pharmacist_stated_use": "local muscle pain",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": "do not apply it to broken skin"
+          }
+        ]
+      }
+    },
+    {
       "event_type": "card.confirmed",
       "payload": {
         "confirmation_id": "confirmation-nurofen-question",
-        "action_type": "show_to_pharmacist",
-        "card_text": "Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?"
+        "action_type": "show_to_pharmacist"
       }
     },
     {
@@ -74,18 +101,45 @@
       "payload": {
         "phase": "completed"
       }
+    },
+    {
+      "event_type": "card.action.status",
+      "payload": {
+        "confirmation_id": "confirmation-nurofen-question",
+        "action_type": "show_to_pharmacist",
+        "phase": "succeeded",
+        "code": null
+      }
+    },
+    {
+      "event_type": "summary.render",
+      "payload": {
+        "summary": {
+          "title_zh": "今天药局沟通重点",
+          "mentioned_drugs": ["paracetamol", "ibuprofen", "voltaren"],
+          "pharmacist_advice_summary_zh": "药师原话摘要：Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars and is for pain and inflammation. Voltaren gel costs fifteen dollars and is for local muscle pain. Payment can be made by cash or card.",
+          "unresolved_questions_zh": [],
+          "follow_up_needed": false,
+          "pharmacist_stated_advice_zh": "Panadol, Nurofen, and Voltaren were explained by the pharmacist; payment can be made by cash or card.",
+          "unresolved_follow_up_questions_zh": [],
+          "confirmed_family_follow_up": false
+        }
+      }
     }
   ],
   "ui": {
-    "main_translation_visible": false,
-    "product_options_visible": false,
-    "summary_visible": false,
+    "main_translation_visible": true,
+    "product_options_visible": true,
+    "summary_visible": true,
     "conversation_log_snippets": [
-      "老人原话: 今天我能帮你什么？",
       "医护人员: 您能告诉我您的生日和姓名吗？",
       "医护人员: I can show you three options. Panadol costs eight dollars...",
-      "KK 代说: Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?"
+      "药师说的产品选项: Panadol, Nurofen, Voltaren gel"
     ]
   },
-  "summary": null
+  "summary": {
+    "mentioned_drugs": ["Panadol", "Nurofen", "Voltaren"],
+    "payment": "cash or card",
+    "visible": true
+  }
 }

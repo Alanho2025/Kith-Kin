@@ -137,6 +137,9 @@ def _card_text_is_unsafe(text: str) -> bool:
     unsafe_markers = (
         "ask pharmacist:",
         "ask pharmacist to",
+        "the patient is",
+        "let kk",
+        "tell the pharmacist",
         "should i take",
         "i should take",
         "i will take",
@@ -209,5 +212,9 @@ def _card_text_is_unsafe(text: str) -> bool:
         "海外版",
         "相容",
         "不相容",
+        "让 kk",
+        "讓 kk",
+        "请 kk",
+        "請 kk",
     )
     return any(marker in normalized for marker in unsafe_markers)

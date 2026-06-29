@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
 
     deployment_mode: str = "local"
     live_transport: Literal["backend_proxy", "gemini_live"] = "backend_proxy"
