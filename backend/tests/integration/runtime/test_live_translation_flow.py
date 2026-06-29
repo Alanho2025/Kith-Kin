@@ -760,6 +760,86 @@ async def test_safety_disclosure_cards_do_not_bundle_allergy_and_medication_in_o
     )
 
 
+async def test_blocked_bundled_health_disclosure_is_replaced_with_split_confirmation_cards(
+) -> None:
+    gateway = CapturingTranslationGateway()
+    orchestrator = StaticCardOrchestrator(
+        TurnOutcome(
+            route=RouteDecision(
+                route_type=RouteType.PHARMACY_RISK,
+                confidence=0.9,
+                reason_code=RouteReasonCode.PHARMACY_TERM,
+            ),
+            guardian=GuardianDecision(
+                guardian_decision_id="guardian-turn-health",
+                decision=GuardianDecisionType.ALLOW,
+                risk_level=CardRiskLevel.MEDICAL,
+                reason_code=GuardianReasonCode.SAFE_TURN,
+            ),
+            card_proposal=materialize_companion_card_draft(
+                CompanionCardDraftSet.model_validate(
+                    {
+                        "cards": [
+                            {
+                                "card_type": "confirm_info",
+                                "zh_text": "确认我在服用赖诺普利并且对青霉素过敏。",
+                                "en_text": (
+                                    "The patient is currently taking Lisinopril and is allergic "
+                                    "to Penicillin. Could you please note this?"
+                                ),
+                                "risk_level": "medical",
+                                "action": {"type": "speak"},
+                            }
+                        ]
+                    }
+                ),
+                source_event_id="evt-blocked-health-card",
+                generated_at=NOW,
+                guardian_decision_id="guardian-blocked-card",
+            ),
+            card_review=GuardianDecision(
+                guardian_decision_id="guardian-card-blocked",
+                decision=GuardianDecisionType.BLOCK,
+                risk_level=CardRiskLevel.MEDICAL,
+                reason_code=GuardianReasonCode.CARD_REVIEW_FAILED,
+            ),
+        )
+    )
+    service = LiveRuntimeService(
+        CardService(lambda: NOW),
+        FakeLiveAdapter(),
+        lambda: NOW,
+        TranslationService(gateway, timeout_ms=1000),
+        turn_orchestrator=orchestrator,
+        user_id=USER_ID,
+    )
+
+    events = await service.handle_provider_event(
+        SESSION_ID,
+        provider_transcript_text(
+            (
+                "Before I suggest anything, do you have any allergies or do you "
+                "take blood pressure medicine?"
+            ),
+            utterance_id="utt-blocked-health-card",
+        ),
+    )
+
+    event_types = [event["event_type"] for event in events]
+    assert "cards.render" in event_types
+    assert "fallback.show" not in event_types
+    cards = next(event for event in events if event["event_type"] == "cards.render")
+    card_texts = [
+        card["en_text"].lower() for card in cards["payload"]["card_set"]["cards"]
+    ]
+    assert any("lisinopril" in text for text in card_texts)
+    assert any("penicillin" in text for text in card_texts)
+    assert all(
+        not ("lisinopril" in text and "penicillin" in text)
+        for text in card_texts
+    )
+
+
 async def test_session_end_summary_contains_natural_products_advice_and_unresolved_questions(
 ) -> None:
     gateway = CapturingTranslationGateway()

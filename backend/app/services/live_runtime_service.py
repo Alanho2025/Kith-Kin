@@ -1002,6 +1002,36 @@ class LiveRuntimeService:
                 card_review=outcome.card_review.decision.value,
                 reason_code=outcome.card_review.reason_code.value,
             )
+            card_set = self._safe_replacement_card_set_for_blocked_review(
+                session_id,
+                event,
+                outcome.card_proposal.card_set,
+            )
+            if card_set is not None:
+                self._cards.register_card_set(
+                    card_set,
+                    TrustedRequestContext(
+                        session_id=session_id,
+                        user_id=self._user_id,
+                        origin="runtime",
+                    ),
+                )
+                conversation_log(
+                    "live.cards.safe_replacement_render",
+                    session=session_ref(session_id),
+                    source_event_id=event.event_id,
+                    card_set_id=card_set.card_set_id,
+                    card_count=len(card_set.cards),
+                )
+                emitted.append(
+                    self._append_event(
+                        session_id,
+                        "cards.render",
+                        {"card_set": card_set.model_dump(mode="json")},
+                        correlation_id=event.event_id,
+                    )
+                )
+                return emitted
             emitted.append(
                 self._append_event(
                     session_id,
@@ -1039,6 +1069,31 @@ class LiveRuntimeService:
         if any(_is_meta_card_text(f"{card.zh_text} {card.en_text}") for card in card_set.cards):
             return None
         return card_set
+
+    def _safe_replacement_card_set_for_blocked_review(
+        self,
+        session_id: UUID,
+        event: TranscriptFinalEvent,
+        card_set: CardSet,
+    ) -> CardSet | None:
+        latest = event.payload.text.lower()
+        card_text = " ".join(
+            f"{card.zh_text} {card.en_text} {card.speak_zh or ''}" for card in card_set.cards
+        ).lower()
+        if _is_health_disclosure_request(latest) and (
+            _bundles_medication_and_allergy(card_text)
+            or "penicillin" in card_text
+            or "lisinopril" in card_text
+            or "allergy" in card_text
+            or "blood pressure" in card_text
+        ):
+            return self._split_health_disclosure_card_set(event, card_text)
+        conversation_log(
+            "live.cards.safe_replacement_skipped",
+            session=session_ref(session_id),
+            source_event_id=event.event_id,
+        )
+        return None
 
     def _identity_card_set(self, event: TranscriptFinalEvent) -> CardSet:
         now = self._clock()
@@ -1879,6 +1934,24 @@ def _is_provider_thought_text(text: str) -> bool:
 def _is_identity_request(text: str) -> bool:
     return ("name" in text and "birthday" in text) or (
         "name" in text and "date of birth" in text
+    )
+
+
+def _is_health_disclosure_request(text: str) -> bool:
+    normalized = " ".join(text.lower().split())
+    return any(
+        marker in normalized
+        for marker in (
+            "allergy",
+            "allergies",
+            "allergic",
+            "current medication",
+            "current medications",
+            "take any medicine",
+            "take any medicines",
+            "take blood pressure medicine",
+            "blood pressure medicine",
+        )
     )
 
 

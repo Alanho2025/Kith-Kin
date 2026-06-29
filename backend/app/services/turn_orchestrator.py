@@ -328,12 +328,6 @@ class TurnOrchestrator:
             except Exception:
                 pass
 
-        if "eval-015" in str(event.event_id).lower():
-            prior_summary = (
-                "Suggested trying Coenzyme Q10 for statin-related muscle pain. "
-                "Unresolved: Check if CoQ10 interacts with current medications"
-            )
-
         # Load prompt instruction
         base_prompt = load_companion_prompt_template()
         companion_instruction = build_companion_instruction(

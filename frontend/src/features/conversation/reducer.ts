@@ -44,6 +44,16 @@ function actionTypeView(value: unknown): CardActionTypeView | null {
     : null;
 }
 
+function riskLevelView(value: unknown): CardRiskLevelView {
+  return value === "normal" ||
+    value === "caution" ||
+    value === "privacy" ||
+    value === "medical" ||
+    value === "urgent"
+    ? value
+    : "normal";
+}
+
 function recordEvent(
   state: ConversationState,
   event: ConversationRuntimeEvent,
@@ -157,7 +167,6 @@ export function conversationReducer(
       return recordEvent(state, event, { status: "translating" });
     case "translation.final": {
       const payload = event.payload as TranslationSegmentView;
-      const isNew = state.activeUtteranceId !== payload.sourceTranscriptEventId;
       const exists = state.chineseSegments.some(
         (segment) => segment.segmentId === payload.segmentId,
       );
@@ -166,9 +175,7 @@ export function conversationReducer(
           ? { ...turn, translatedText: payload.translatedText }
           : turn,
       );
-      const nextSegments = isNew
-        ? [payload]
-        : exists
+      const nextSegments = exists
         ? state.chineseSegments
         : [...state.chineseSegments, payload];
 
@@ -188,8 +195,20 @@ export function conversationReducer(
             : "checking",
       });
     }
-    case "tool.status":
-      return recordEvent(state, event, { status: "checking" });
+    case "tool.status": {
+      const payload = event.payload as { phase?: string };
+      const status =
+        payload.phase === "started"
+          ? "checking"
+          : payload.phase === "succeeded"
+          ? "listening"
+          : payload.phase === "blocked"
+          ? "blocked"
+          : payload.phase === "failed"
+          ? "error"
+          : state.status;
+      return recordEvent(state, event, { status });
+    }
     case "cards.render": {
       const payload = event.payload as { cardSet: RawCardSet | null };
       const rawCardSet = payload.cardSet;
@@ -212,13 +231,16 @@ export function conversationReducer(
             zhText: card.zhText || card.zh_text || "",
             enText: card.enText || card.en_text || "",
             speakZh: card.speakZh || card.speak_zh || undefined,
-            riskLevel: (card.riskLevel || card.risk_level || "low") as CardRiskLevelView,
+            riskLevel: riskLevelView(card.riskLevel || card.risk_level),
             actionType,
           };
 
         }),
       } : null;
-      return recordEvent(state, event, { activeCardSet: cardSet });
+      return recordEvent(state, event, {
+        activeCardSet: cardSet,
+        status: cardSet && cardSet.cards.length > 0 ? "needs_confirmation" : state.status,
+      });
     }
     case "product.options.render": {
       const payload = event.payload as { options?: RawProductOption[] };
@@ -288,7 +310,7 @@ export function conversationReducer(
         replayed: payload.replayed ?? null,
       };
       return recordEvent(state, event, {
-        status: "speaking",
+        status: "checking",
         confirmation: null,
         activeCardSet: null,
         actions: [...state.actions, action],
@@ -313,15 +335,33 @@ export function conversationReducer(
         phase: payload.phase ?? null,
         replayed: null,
       };
+      const status =
+        payload.phase === "started"
+          ? state.status === "speaking"
+            ? "speaking"
+            : "checking"
+          : payload.phase === "succeeded"
+          ? "listening"
+          : payload.phase === "blocked"
+          ? "blocked"
+          : payload.phase === "failed"
+          ? "error"
+          : state.status;
       return recordEvent(state, event, {
-        status: payload.phase === "failed" || payload.phase === "blocked" ? "error" : state.status,
+        status,
         actions: [...state.actions, action],
       });
     }
     case "audio.speaking": {
       const payload = event.payload as { phase?: string };
+      const status =
+        payload.phase === "started"
+          ? "speaking"
+          : payload.phase === "completed" || payload.phase === "interrupted"
+          ? "listening"
+          : state.status;
       return recordEvent(state, event, {
-        status: payload.phase === "completed" || payload.phase === "interrupted" ? "listening" : "speaking",
+        status,
         confirmation: null,
       });
     }
@@ -338,7 +378,10 @@ export function conversationReducer(
       });
     case "summary.render": {
       const payload = event.payload as { summary: VisitSummaryView };
-      return recordEvent(state, event, { summary: payload.summary });
+      return recordEvent(state, event, {
+        summary: payload.summary,
+        status: "needs_confirmation",
+      });
     }
     case "session.ended":
       return recordEvent(state, event, { status: "ended" });

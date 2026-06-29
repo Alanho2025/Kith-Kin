@@ -28,7 +28,7 @@ export interface UnknownRuntimeViewEvent {
   sequence: number;
   timestamp: string;
   correlationId: string | null;
-  payload: null;
+  payload: unknown;
 }
 
 export type RuntimeViewEvent = TranscriptFinalViewEvent | UnknownRuntimeViewEvent;

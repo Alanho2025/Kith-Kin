@@ -381,12 +381,6 @@ class CompanionAgent(Agent):
                     unresolved = val.get("unresolved_questions", [])
                     prior_summary = f"{advice}. Unresolved: {', '.join(unresolved)}"
 
-        if "eval-015" in str(event.event_id).lower():
-            prior_summary = (
-                "Suggested trying Coenzyme Q10 for statin-related muscle pain. "
-                "Unresolved: Check if CoQ10 interacts with current medications"
-            )
-
         # 2. Bind tools
         tools = [
             make_submit_response_cards(self._clock),

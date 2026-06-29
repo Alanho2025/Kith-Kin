@@ -391,6 +391,54 @@ describe("ConversationPage", () => {
     expect(subtitle).not.toHaveTextContent("中文翻译会显示在这里");
   });
 
+  it("shows only the latest faithful translation in the large-print main area", async () => {
+    const firstTranslation = "早上好。你今天怎么样？";
+    const secondTranslation = "您有任何药物过敏吗？";
+    const flow = [
+      runtimeEvent("transcript.final", "evt-latest-source-1", 1, {
+        utteranceId: "utt-latest-1",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Good morning. How are you today?",
+        revision: 1,
+      }),
+      runtimeEvent("translation.final", "evt-latest-translation-1", 2, {
+        sourceTranscriptEventId: "evt-latest-source-1",
+        segmentId: "seg-latest-1",
+        sourceLanguage: "en",
+        targetLanguage: "zh_cn",
+        translatedText: firstTranslation,
+        mode: "faithful",
+        appendOnly: true,
+        latencyMs: 10,
+      }),
+      runtimeEvent("transcript.final", "evt-latest-source-2", 3, {
+        utteranceId: "utt-latest-2",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Do you have any drug allergies?",
+        revision: 1,
+      }),
+      runtimeEvent("translation.final", "evt-latest-translation-2", 4, {
+        sourceTranscriptEventId: "evt-latest-source-2",
+        segmentId: "seg-latest-2",
+        sourceLanguage: "en",
+        targetLanguage: "zh_cn",
+        translatedText: secondTranslation,
+        mode: "faithful",
+        appendOnly: true,
+        latencyMs: 10,
+      }),
+    ];
+
+    render(<ConversationPage runtime={new MockConversationRuntime(flow)} sessionId="ses-latest-only" />);
+
+    const subtitle = await screen.findByLabelText("忠实中文翻译");
+    expect(within(subtitle).queryByText(firstTranslation)).not.toBeInTheDocument();
+    expect(within(subtitle).getByText(secondTranslation)).toBeInTheDocument();
+    expect(screen.getAllByText(firstTranslation).length).toBeGreaterThan(0);
+  });
+
   it("keeps product options in the main workspace with the translation after product.options.render", async () => {
     const translatedText =
       "药师说 Panadol 八美元用于疼痛和发烧；Nurofen 十二美元用于疼痛和炎症，但服用降压药时要先询问。";
