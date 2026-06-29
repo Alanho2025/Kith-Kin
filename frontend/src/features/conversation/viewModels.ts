@@ -37,9 +37,11 @@ export interface ResponseCardView {
   cardId: string;
   zhText: string;
   enText: string;
+  speakZh?: string;
   riskLevel: CardRiskLevelView;
   actionType: CardActionTypeView;
 }
+
 
 export interface CardSetView {
   cardSetId: string;

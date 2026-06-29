@@ -74,6 +74,7 @@ class MemoryRepository:
         key: str,
         tags: tuple[str, ...],
         idempotency_key: UUID,
+        expires_at: datetime | None = None,
     ) -> MemoryWriteOutcome:
         payload = summary.model_dump(mode="json")
         async with self._session_factory() as session:
@@ -97,12 +98,14 @@ class MemoryRepository:
                 value=payload,
                 tags=list(tags),
                 idempotency_key=idempotency_key,
+                expires_at=expires_at,
                 created_at=now,
                 updated_at=now,
             )
             session.add(row)
             await session.commit()
             return MemoryWriteOutcome(row.id, row.key, tuple(row.tags), False)
+
 
 
 def _includes(request: RetrievalRequest, category: RetrievalCategory) -> bool:

@@ -46,6 +46,55 @@ describe("conversationReducer", () => {
     expect(confirmed.turns[0].sourceText).toContain("Could you please check");
   });
 
+  it("records confirmed card speech using speakZh as translatedText if available", () => {
+    const withCards = conversationReducer(
+      initialConversationState,
+      makeEvent("cards.render", "evt-cards-1", {
+        cardSet: {
+          cardSetId: "cards-1",
+          revision: 1,
+          cards: [
+            {
+              cardId: "card-1",
+              zhText: "确认我正在服用血壓藥赖诺普利并告诉药师",
+              enText: "The patient is currently taking Lisinopril. Could you check if there is an interaction?",
+              speakZh: "患者目前正在服用赖诺普利。请问这有冲突吗？",
+              riskLevel: "medical",
+              actionType: "show_to_pharmacist",
+            },
+          ],
+        },
+      }),
+    );
+    const selected = conversationReducer(
+      withCards,
+      makeEvent("card.selected", "evt-selected-1", {
+        cardSetId: "cards-1",
+        cardId: "card-1",
+        confirmationId: "confirmation-1",
+      }),
+    );
+
+    const confirmed = conversationReducer(
+      selected,
+      makeEvent("card.confirmed", "evt-confirmed-1", {
+        confirmationId: "confirmation-1",
+        actionType: "show_to_pharmacist",
+        replayed: false,
+      }),
+    );
+
+    expect(confirmed.turns).toHaveLength(1);
+    expect(confirmed.turns[0].speaker).toBe("kk");
+    expect(confirmed.turns[0].sourceText).toBe(
+      "The patient is currently taking Lisinopril. Could you check if there is an interaction?"
+    );
+    expect(confirmed.turns[0].translatedText).toBe(
+      "患者目前正在服用赖诺普利。请问这有冲突吗？"
+    );
+  });
+
+
   it("stores neutral pharmacist-stated product options", () => {
     const state = conversationReducer(
       initialConversationState,

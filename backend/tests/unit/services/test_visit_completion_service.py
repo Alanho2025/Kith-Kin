@@ -5,6 +5,10 @@ import pytest
 
 from app.domain.credentials import TrustedRequestContext
 from app.services.visit_completion_service import VisitCompletionService
+from app.services.visit_summary_service import VisitSummaryService
+from app.services.notification_service import NotificationService
+from app.adapters.notification_adapter import NotificationAdapter
+
 
 SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
 USER_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -37,9 +41,15 @@ def transcript_event(
 
 @pytest.mark.anyio
 async def test_summary_uses_only_pharmacist_transcript_without_inventing_advice() -> None:
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(None, notification_adapter)
+
     service = VisitCompletionService(
         memory_repository=None,
-        notification_repository=None,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=lambda: NOW,
         get_session_events=lambda _sid: [
             transcript_event(
                 speaker="pharmacist",
@@ -63,9 +73,15 @@ async def test_summary_uses_only_pharmacist_transcript_without_inventing_advice(
 
 @pytest.mark.anyio
 async def test_summary_does_not_add_interaction_or_alternative_not_spoken_by_pharmacist() -> None:
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(None, notification_adapter)
+
     service = VisitCompletionService(
         memory_repository=None,
-        notification_repository=None,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=lambda: NOW,
         get_session_events=lambda _sid: [
             transcript_event(
                 speaker="parent",
@@ -93,9 +109,15 @@ async def test_summary_does_not_add_interaction_or_alternative_not_spoken_by_pha
 
 @pytest.mark.anyio
 async def test_summary_exposes_product_goal_partitions_without_rewriting_questions() -> None:
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(None, notification_adapter)
+
     service = VisitCompletionService(
         memory_repository=None,
-        notification_repository=None,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=lambda: NOW,
         get_session_events=lambda _sid: [
             transcript_event(
                 speaker="pharmacist",

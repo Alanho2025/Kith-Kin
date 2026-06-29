@@ -34,7 +34,9 @@ def materialize_companion_card_draft(
                 card_type=draft.card_type,
                 zh_text=draft.zh_text,
                 en_text=draft.en_text,
+                speak_zh=draft.speak_zh,
                 risk_level=draft.risk_level,
+
                 action=draft.action,
                 requires_parent_confirmation=True,
                 requires_guardian_approval=True,

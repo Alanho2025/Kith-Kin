@@ -50,12 +50,15 @@ interface RawCard {
   zhText?: string;
   en_text?: string;
   enText?: string;
+  speak_zh?: string;
+  speakZh?: string;
   risk_level?: string;
   riskLevel?: string;
   action_type?: string;
   actionType?: string;
   action?: { type?: string };
 }
+
 
 interface RawCardSet {
   card_set_id?: string;
@@ -171,9 +174,11 @@ export function conversationReducer(
             cardId: card.cardId || card.card_id || "",
             zhText: card.zhText || card.zh_text || "",
             enText: card.enText || card.en_text || "",
+            speakZh: card.speakZh || card.speak_zh || undefined,
             riskLevel: (card.riskLevel || card.risk_level || "low") as CardRiskLevelView,
             actionType,
           };
+
         }),
       } : null;
       return recordEvent(state, event, { activeCardSet: cardSet });
@@ -220,9 +225,10 @@ export function conversationReducer(
               transcriptEventId: event.eventId,
               speaker: "kk" as const,
               sourceText: confirmedCard.enText,
-              translatedText: confirmedCard.zhText,
+              translatedText: confirmedCard.speakZh || confirmedCard.zhText,
             },
           ]
+
         : state.turns;
       return recordEvent(state, event, { status: "speaking", confirmation: null, turns });
     }

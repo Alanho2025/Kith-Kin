@@ -40,11 +40,22 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     def get_session_events(sid: UUID):
         return session_events
 
+    from app.services.visit_summary_service import VisitSummaryService
+    from app.adapters.notification_adapter import NotificationAdapter
+    from app.services.notification_service import NotificationService
+
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(notification_repo, notification_adapter)
+
     completion_service = VisitCompletionService(
         memory_repository=memory_repo,
-        notification_repository=notification_repo,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=clock.now,
         get_session_events=get_session_events,
     )
+
 
     confirmation_repository = InMemoryConfirmationRepository()
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)

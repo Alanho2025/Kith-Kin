@@ -94,11 +94,22 @@ def runtime(
         user_id=USER_ID if turn_orchestrator is not None else None,
     )
     if with_completion_service:
+        from app.services.visit_summary_service import VisitSummaryService
+        from app.adapters.notification_adapter import NotificationAdapter
+        from app.services.notification_service import NotificationService
+
+        visit_summary_service = VisitSummaryService()
+        notification_adapter = NotificationAdapter()
+        notification_service = NotificationService(None, notification_adapter)
+
         service._completion_service = VisitCompletionService(
             memory_repository=None,
-            notification_repository=None,
+            visit_summary_service=visit_summary_service,
+            notification_service=notification_service,
+            clock=lambda: NOW,
             get_session_events=lambda sid: service._buffers.get(sid, []),
         )
+
     return service
 
 

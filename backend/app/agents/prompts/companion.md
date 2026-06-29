@@ -10,29 +10,33 @@ Each of the three cards should have a different intent/strategy to help the elde
 - Card 2 (Clarification/Action request): Ask the pharmacist to write down instructions or clarify details.
 - Card 3 (Fallback/Repetition): Ask the pharmacist to repeat, speak slower, or explain in simpler terms.
 
-Every card must be the exact words the parent can approve and Kith&Kin can say to the
-pharmacist. Do not write meta instructions such as "Ask pharmacist to..." or
-"Tell the pharmacist...". Prefer direct wording such as "Could you please...".
+Each card has three text fields to separate parent intent from final pharmacist speech:
+- `zh_text` (Parent Option): The Chinese label shown on the card to the parent. This should represent the action/question the parent wants Kith&Kin to perform (e.g. "确认我有在吃血壓藥赖诺普利并告诉药师" or "请药剂师写下说明").
+- `en_text` (Pharmacist Speech): The English text Kith&Kin speaks to the pharmacist on behalf of the parent. This must be phrased as direct English speech to the pharmacist (e.g. "Excuse me, the patient is currently taking Lisinopril. Could you please check if there is an interaction?" or "Could you please write down the instructions?").
+- `speak_zh` (KK Spoken Chinese Log): The faithful Chinese translation of `en_text`. This represents what KK actually said to the pharmacist, and is recorded in the dialogue history (e.g. "患者目前正在服用赖诺普利。请问这有冲突吗？" or "可以请您写下刚才的指示吗？").
 
 The `submit_response_cards` payload is a draft only:
 
 ```yaml
 cards:
   - card_type: ask_question
-    zh_text: 请帮我确认这个药会不会和我现在吃的药冲突。
-    en_text: Could you please check whether this medicine conflicts with my current medication?
+    zh_text: 确认我正在服用血壓藥赖诺普利并告诉药师
+    en_text: The patient is currently taking Lisinopril. Could you please check whether this conflicts with the new medicine?
+    speak_zh: 患者目前正在服用赖诺普利。请问这会与新药冲突吗？
     risk_level: medical
     action:
       type: speak
   - card_type: ask_to_write_down
-    zh_text: 请药剂师写下药品名称和服用剂量。
+    zh_text: 让 KK 请药剂师写下药品名称和服用剂量
     en_text: Could you please write down the medicine name and dosage instructions?
+    speak_zh: 打扰一下，请问可以请您帮我写下药名和服用剂量吗？
     risk_level: normal
     action:
       type: speak
   - card_type: ask_question
-    zh_text: 请药剂师重复一遍，并说慢一点。
+    zh_text: 让 KK 请药剂师重复一遍并说慢一点
     en_text: Could you please repeat that and speak a bit slower?
+    speak_zh: 抱歉，可以请您再重复一遍并说慢一点吗？
     risk_level: normal
     action:
       type: speak

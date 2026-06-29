@@ -455,6 +455,7 @@ class CompanionAgent(Agent):
                             "Would you like Kith&Kin to save this pharmacy visit summary "
                             "after you confirm?"
                         ),
+                        "speak_zh": "请帮我保存这次药房沟通记录。",
                         "risk_level": "medical",
                         "action": {"type": "save_memory"},
                     },
@@ -462,6 +463,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_to_write_down",
                         "zh_text": "请帮我写下药房指示好吗？",
                         "en_text": "Could you please write down the pharmacy instructions for me?",
+                        "speak_zh": "打扰一下，可以请您帮我写下刚才的药房指示吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -469,6 +471,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您再重复一遍好吗？",
                         "en_text": "Could you please repeat that?",
+                        "speak_zh": "抱歉，可以请您再重复一遍刚才的话吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -487,6 +490,7 @@ class CompanionAgent(Agent):
                             "Would you like Kith&Kin to send this pharmacy summary to my "
                             "family after I confirm?"
                         ),
+                        "speak_zh": "请帮我发送这次药房沟通摘要给我的家人。",
                         "risk_level": "medical",
                         "action": {"type": "notify_family"},
                     },
@@ -494,6 +498,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_to_write_down",
                         "zh_text": "请帮我写下处方详情好吗？",
                         "en_text": "Could you please write down the prescription details for me?",
+                        "speak_zh": "打扰一下，可以请您帮我写下处方的详细情况吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -501,6 +506,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您再重复一遍好吗？",
                         "en_text": "Could you please repeat that?",
+                        "speak_zh": "抱歉，可以请您再重复一遍吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -514,6 +520,7 @@ class CompanionAgent(Agent):
                             "Could you please check this medicine against my current "
                             "blood pressure medicine?"
                         ),
+                        "speak_zh": "打扰一下，请问这个药是否适合与我目前正在服用的降血压药一起使用？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -521,6 +528,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_to_write_down",
                         "zh_text": "请帮我写下药品名好吗？",
                         "en_text": "Could you please write down the medicine name?",
+                        "speak_zh": "请问您能帮我写下药品名称吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -528,6 +536,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请帮我确认用法用量好吗？",
                         "en_text": "Could you please confirm the dosage instructions?",
+                        "speak_zh": "请问您能帮我确认一下具体的用法用量吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -544,11 +553,12 @@ class CompanionAgent(Agent):
                 draft_cards = [
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请帮我说明这几个选择的成分、用途、用法和注意事项好吗？",
+                        "zh_text": "请帮我说明这几个选择的成分、用途、用法 and 注意事项好吗？",
                         "en_text": (
                             "Could you please explain the active ingredient, intended use, "
                             "directions, and cautions for each option?"
                         ),
+                        "speak_zh": "打扰一下，可以请您帮我说明这几个选项的成分、用途、用法和注意事项吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -559,6 +569,7 @@ class CompanionAgent(Agent):
                             "Could you please confirm which option, if any, is closest "
                             "by active ingredient to the medicine I used before?"
                         ),
+                        "speak_zh": "请问哪一个选项在有效成分上与我之前服用的药物最接近？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -569,6 +580,7 @@ class CompanionAgent(Agent):
                             "Could you please write down each option's name, directions, "
                             "and warnings?"
                         ),
+                        "speak_zh": "可以请您帮我写下每个选项的药名、用法和注意事项吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -588,6 +600,7 @@ class CompanionAgent(Agent):
                             "Could you please confirm whether there is any close option "
                             "by checking the active ingredient?"
                         ),
+                        "speak_zh": "打扰一下，请问能否根据有效成分帮我确认有没有相近的药物选择？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -598,6 +611,7 @@ class CompanionAgent(Agent):
                             "Could you please confirm the intended use or symptoms "
                             "before comparing options?"
                         ),
+                        "speak_zh": "请问这种药原本是用于治疗什么症状的？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -608,6 +622,7 @@ class CompanionAgent(Agent):
                             "Could you please write down the active ingredient and "
                             "medicine name?"
                         ),
+                        "speak_zh": "可以请您帮我写下有效成分和药名吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -621,6 +636,7 @@ class CompanionAgent(Agent):
                             "Could you please check whether ibuprofen is suitable with "
                             "my current medicines?"
                         ),
+                        "speak_zh": "打扰一下，请问布洛芬是否适合与我目前正在服用的药物一起使用？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -628,6 +644,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_to_write_down",
                         "zh_text": "请帮我写下药名好吗？",
                         "en_text": "Could you please write down the medicine name?",
+                        "speak_zh": "可以请您帮我写下药名吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -635,6 +652,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您再重复一遍好吗？",
                         "en_text": "Could you please repeat that?",
+                        "speak_zh": "抱歉，可以请您再重复一遍吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -648,6 +666,7 @@ class CompanionAgent(Agent):
                             "Could you please confirm what medicine allergy information "
                             "you need to check?"
                         ),
+                        "speak_zh": "打扰一下，请问您需要检查哪些药物过敏信息？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -658,6 +677,7 @@ class CompanionAgent(Agent):
                             "Could you please explain what allergy signs I should watch "
                             "for with this medicine?"
                         ),
+                        "speak_zh": "请问使用这个药物时，我需要注意哪些过敏反应？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -665,6 +685,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_to_write_down",
                         "zh_text": "请您再重复一遍好吗？",
                         "en_text": "Could you please repeat that?",
+                        "speak_zh": "抱歉，可以请您再重复一遍吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -682,6 +703,7 @@ class CompanionAgent(Agent):
                                 "Could you please check whether Coenzyme Q10 is suitable "
                                 "with my current medicines?"
                             ),
+                            "speak_zh": "打扰一下，请问辅酶Q10是否适合与我目前正在服用的药物一起使用？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
@@ -692,6 +714,7 @@ class CompanionAgent(Agent):
                                 "Could you please confirm which prescription medicines "
                                 "I am picking up?"
                             ),
+                            "speak_zh": "请问我要领取哪些处方药？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
@@ -699,6 +722,7 @@ class CompanionAgent(Agent):
                             "card_type": "ask_question",
                             "zh_text": "请您再重复一遍好吗？",
                             "en_text": "Could you please repeat that?",
+                            "speak_zh": "抱歉，可以请您再重复一遍吗？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         }
@@ -712,6 +736,7 @@ class CompanionAgent(Agent):
                                 "Could you please confirm which prescription medicines "
                                 "I am picking up?"
                             ),
+                            "speak_zh": "打扰一下，请问我要领取哪些处方药？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
@@ -722,6 +747,7 @@ class CompanionAgent(Agent):
                                 "Could you please confirm how many prescriptions "
                                 "I am picking up today?"
                             ),
+                            "speak_zh": "请问我今天要领取几种处方药？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
@@ -729,6 +755,7 @@ class CompanionAgent(Agent):
                             "card_type": "ask_question",
                             "zh_text": "请您再重复一遍好吗？",
                             "en_text": "Could you please repeat that?",
+                            "speak_zh": "抱歉，可以请您再重复一遍吗？",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         }
@@ -739,6 +766,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您再重复一遍好吗？",
                         "en_text": "Could you please repeat that?",
+                        "speak_zh": "抱歉，可以请您再重复一遍吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -746,6 +774,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您说慢一点好吗？",
                         "en_text": "Could you please speak a little slower?",
+                        "speak_zh": "可以请您说慢一点吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
@@ -753,6 +782,7 @@ class CompanionAgent(Agent):
                         "card_type": "ask_question",
                         "zh_text": "请您帮我写下来好吗？",
                         "en_text": "Could you please write that down for me?",
+                        "speak_zh": "可以请您帮我写下来吗？",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }

@@ -29,6 +29,7 @@ class TraceRepository:
         *,
         event_type: str,
         payload: dict[str, object],
+        expires_at: datetime | None = None,
     ) -> None:
         safe_payload = {key: payload[key] for key in sorted(payload) if key in RAG_TRACE_FIELDS}
         async with self._session_factory() as session:
@@ -49,7 +50,9 @@ class TraceRepository:
                     sequence=max_seq + 1,
                     event_type=event_type,
                     payload=safe_payload,
+                    expires_at=expires_at,
                     created_at=self._clock(),
                 )
             )
             await session.commit()
+
