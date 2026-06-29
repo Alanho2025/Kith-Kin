@@ -93,3 +93,140 @@ Running 1 test using 1 worker
 *   Ruff：`All checks passed!`
 *   Mypy：`Success: no issues found in 90 source files`
 *   Frontend Typecheck & Lint：`All checks passed!`
+
+---
+
+## 🛠️ 第二輪 Codex 修改 — 藥局安全邊界落地 (2026-06-29)
+
+本輪主要目標：把藥局場景的安全邊界從文檔規則落到 code 和 test 裡。
+
+### 1. 新增文檔
+*   **Google AI 藥局/醫療安全限制文檔**：新增 [`google_ai_pharmacy_medical_safety.md`](docs/google_ai_pharmacy_medical_safety.md)，記錄 Gemini 模型側對藥物/醫療回答的限制，供 prompt 調校參考。
+*   **產品 E2E 目標文檔**：新增 [`pharmacy_counter_e2e_product_goal.md`](docs/pharmacy_counter_e2e_product_goal.md)，定義完整藥局櫃檯 demo 的端到端驗收標準。
+
+### 2. Companion Prompt / Fallback Cards 安全化
+*   **卡片語氣修正**：`companion.md` prompt 和 `companion_agent.py` fallback cards 改成「可直接對藥師說的確認問句」（第一人稱）。不再產生：
+    *   `Ask pharmacist...`（第三人稱指示語氣）
+    *   `Should I take...`（主觀醫療建議）
+    *   `I have no allergies`（編造過敏狀態）
+*   **卡片行動類型安全化**：只有 `speak` / `show_to_pharmacist` action type 的卡片文字會被送到 Gemini TTS 播放；`save_memory` / `notify_family` / `no_action` 不再拿卡片英文觸發 Google 側醫療安全警報。
+
+### 3. Guardian 卡片審查強化
+*   Guardian 現在會攔截：
+    *   **Meta-card**：指示型卡片（如 "Ask pharmacist to..."）
+    *   **直接醫療建議**：如 "Take this medicine" / "Should I take..."
+    *   **編造過敏狀態**：如 "I have no allergies" / "I don't have any allergies"
+
+### 4. 前端對話記錄 Speaker 標記修正
+*   確認後由 KK 代說的卡片在對話紀錄中標為 `KK 代说`（`speaker: "kk"`），不再錯誤顯示為老人原話。
+
+### 5. Small Talk 翻譯優先，不出卡
+*   藥劑師的寒暄語（"How can I help you?" 等）現在只做翻譯，不產生回應卡片，避免老人在無需決策的情境下看到不必要的選項。
+
+### 6. 藥師產品選項整理表格
+*   新增 `PharmacyProductOptionTracker` (`pharmacy_product_options.py`)：template-grade 整理藥師提到的產品名稱、價格、用途、注意事項，不做推薦判斷，只整理藥師實際說過的信息。
+
+### 7. Visit Summary 改為 Transcript-Based
+*   `visit_completion_service.py` 改為基於實際對話記錄生成摘要，不再硬編碼加入 Panadol、interaction、CoQ10 follow-up、family notify 等未被實際說出的醫療內容。
+
+### 8. 後端 E2E 測試擴展
+*   `test_two_visit_flow.py` 現在覆蓋完整場景：small talk → help prompt → parent request → allergy question/cards → 3 options → prices → parent purchase → session end summary。
+
+---
+
+## 🧪 第二輪測試驗證報告
+
+### 1. 後端測試
+```bash
+$ backend/.venv/bin/pytest
+================== 214 passed, 1 skipped in 3.xx s ==================
+```
+
+### 2. 前端測試
+```bash
+$ npx vitest run
+Test Files  XX passed
+      Tests  29 passed (29)
+```
+
+### 3. 代碼質量
+*   `backend/.venv/bin/ruff check app tests`：passed
+*   `npm run typecheck`：passed
+*   `git diff --check`：passed
+
+---
+
+## 🐛 已知 Bug 與 Gap
+
+### Bug 1：底部四個按鈕（我自己说 / 请稍等 / 重复 / 结束）點擊後無法觸發錄音
+
+**現象**：點擊這四個按鈕沒有實際效果（不會開啟麥克風或改變錄音狀態）。
+
+**根因分析**：
+
+前端有兩套獨立的麥克風控制路徑，彼此不連通：
+
+1.  **頂部按鈕路徑**（能錄音 ✅）：
+    *   「听药剂师说话」和「按住说中文」直接呼叫 `setMicrophoneMode()` → 修改 `activeMicMode` state → 呼叫 `runtime.setMicrophoneEnabled(true)` → `BackendConversationRuntime` 開啟 `AudioRecorder` 並開始透過 WebSocket 傳送 PCM 音訊。
+
+2.  **底部按鈕路徑**（不能錄音 ❌）：
+    *   [`BottomControls.tsx`](frontend/src/components/BottomControls.tsx) 的四個按鈕透過 `onCommand()` → `sendCommand()` 只發送 WebSocket JSON 指令（如 `control.self_speak`、`control.please_wait`）到後端。
+    *   後端 [`RuntimeCommandService`](backend/app/services/runtime_command_service.py) 收到後回傳 `audio.muted` / `audio.listening` 事件。
+    *   前端 [`reducer.ts`](frontend/src/features/conversation/reducer.ts) 收到 `audio.listening` 事件後只更新 `state.status`（UI 狀態），**不會呼叫 `setMicrophoneEnabled()`**，也不會改變 `activeMicMode`。
+    *   因此 `BackendConversationRuntime` 的 `AudioRecorder` 狀態不變，麥克風保持原來的開/關狀態。
+
+**影響**：
+*   「我自己说」按了沒有效果，老人以為可以自己說話但麥克風沒開。
+*   「请稍等」無法暫停麥克風。
+*   「重复」無法重新開啟收聽。
+
+**修復方向**：
+*   方案 A：讓 `ConversationPage` 監聽 `state.status` 的變化（如 `listening` → 觸發 `setMicrophoneMode("pharmacist")`），將後端回傳的 `audio.listening` 事件與前端麥克風控制連通。
+*   方案 B：讓底部按鈕直接操作 `activeMicMode`（同時也發送 WebSocket 指令），不依賴後端回傳事件。
+
+---
+
+### Bug 2：「按住說中文」錄到的音被標記為醫護人員（pharmacist）而非老人（parent）
+
+**現象**：老人按住「按住说中文」按鈕說中文，對話紀錄和翻譯流程中卻顯示為「醫護人員」。
+
+**根因分析**：
+
+整條音訊路徑缺少 speaker 上下文傳遞：
+
+1.  **前端**：[`ConversationPage.tsx`](frontend/src/pages/ConversationPage.tsx) 的 `startParentMic()` 設定 `activeMicMode = "parent"`，但 [`BackendConversationRuntime.ts`](frontend/src/features/conversation/runtime/BackendConversationRuntime.ts) 的 `setMicrophoneEnabled()` 只有一個 `boolean` 參數，**不傳遞 speaker 身份**：
+    ```ts
+    // BackendConversationRuntime.ts:155-158
+    setMicrophoneEnabled(enabled: boolean): void {
+      this.userMicEnabled = enabled;
+      this.micMode = enabled ? "listening_to_pharmacist" : "paused"; // 永遠是 pharmacist
+    }
+    ```
+
+2.  **音訊傳輸**：`AudioRecorder` 將 PCM 原始音訊透過 WebSocket binary frame 傳送到後端，**不帶任何 metadata**（沒有 speaker tag）。
+
+3.  **後端**：[`live_runtime_service.py`](backend/app/services/live_runtime_service.py) 的 `_read_client_loop` 直接將 binary frame 轉發給 Gemini Live API（`port.send_audio(frame)`），不加任何標記。
+
+4.  **Gemini Live API 回傳**：[`gemini_live_adapter.py`](backend/app/adapters/gemini_live_adapter.py) 的 `_process_message` 收到 `input_transcription` 後 **hardcode** `speaker: "pharmacist"`：
+    ```python
+    # gemini_live_adapter.py:179-184
+    flat_msg = {
+        "speaker": "pharmacist",  # ← 永遠寫死為 pharmacist
+        "language": "en",
+        ...
+    }
+    ```
+
+5.  因此不論是藥劑師還是老人的語音，只要是透過麥克風進來的 `input_transcription`，一律被標記為 `pharmacist`。
+
+**影響**：
+*   老人說的中文被當成藥劑師的英文處理，觸發翻譯流程（英→中）。
+*   對話紀錄中老人的話顯示在 pharmacist 氣泡裡。
+*   Turn orchestrator 把老人的話當成藥劑師的話去生成回應卡片。
+
+**修復方向**：
+1.  `ConversationRuntime` 介面新增 `setActiveSpeaker(speaker: "parent" | "pharmacist")` 方法。
+2.  `BackendConversationRuntime` 在音訊串流啟動時發送 JSON 控制訊息告知後端目前說話者身份（如 `{ event_type: "audio.speaker_changed", payload: { speaker: "parent" } }`）。
+3.  後端 `LiveRuntimeService` 維護每個 session 的當前 speaker 狀態。
+4.  `GeminiLiveAdapter` 從 session 狀態取得 speaker 而非 hardcode。
+5.  當 speaker 是 parent 時，翻譯方向應改為 中→英，且不應觸發 turn orchestrator 生成回應卡片。
