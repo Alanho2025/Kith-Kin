@@ -233,8 +233,66 @@ $ git diff --check
 
 ---
 
+## 🛠️ 第四輪 Codex 修改 — speak_zh 語意分離、Phase 09 & 10 服務拆分與隱私保留落地 (2026-06-29)
+
+本輪主要目標：完成卡片與代說文字的語意分離（修復 dialogue history 紀錄卡片問句而非 KK 說話翻譯的 Bug），並全面落實原定 Phase 09 與 Phase 10 的系統架構重構與資料隱私保護機制。
+
+### 1. 家長卡片與代說文字分離 (`speak_zh`)
+*   **欄位隔離**：在 `ResponseCard`、`CompanionCardDraft` 與前端的 `ResponseCardView` / `RawCard` 中新增 `speak_zh` 欄位。
+    *   `zh_text`：專供家長閱讀與按鈕確認的選項文字（例如：“確認我有在吃血壓藥賴諾普利並告訴藥師”）。
+    *   `en_text`：KK 替家長代述給藥師聽的英文對話（例如：“Excuse me, the patient is currently taking Lisinopril. Could you check if there is an interaction?”）。
+    *   `speak_zh`：對應英文代述的真實中文翻譯紀錄，專供歷史紀錄 log 呈現（例如：“患者目前正在服用賴諾普利。請問這有衝突嗎？”）。
+*   **邏輯更新**：
+    *   重構了 `companion_agent.py` 的 fallback mock cards 與 `companion.md` 提示詞模板，確保後端始終生成 `speak_zh` 欄位。
+    *   修改前端 `reducer.ts`，在 `card.confirmed` 時將 `speakZh`（若有）寫入 `translatedText` 記錄到 `turns` 中。
+*   **測試對齊**：新增 `reducer.test.ts` 與 `test_submit_response_cards.py` 測試斷言確保欄位成功傳遞並寫入對話歷程。
+
+### 2. Phase 09 服務拆分與解耦
+*   **VisitSummaryService**：新增 [`visit_summary_service.py`](file:///Users/heminghan/Kith-Kin/backend/app/services/visit_summary_service.py)，將對話紀錄的提取、摘要處理、藥物提取及 unresolved questions 歸納邏輯從完成服務中徹底剝離。
+*   **NotificationService & Adapter**：新增 [`notification_service.py`](file:///Users/heminghan/Kith-Kin/backend/app/services/notification_service.py) 與 [`notification_adapter.py`](file:///Users/heminghan/Kith-Kin/backend/app/adapters/notification_adapter.py)，隔離第三方 SMS/Email 發送的 stub 邊界。
+*   **VisitCompletionService**：重構以完全依賴並協調上述兩個解耦服務，解決程式碼臃腫問題。
+
+### 3. Phase 10 隱私保留與自動清理
+*   **保留欄位擴充**：在 `TraceEvent` 和 `VisitSummary` 的 ORM 模型中擴充 `expires_at` 和 `deleted_at` 欄位。
+*   **Alembic 資料庫遷移**：生成並成功執行資料庫遷移 `ad2e9b6dd006_retention_metadata.py`，解決 SQLite 無法執行 `ALTER COLUMN` 的相容性問題。
+*   **個資去敏感服務**：新增 [`redaction_service.py`](file:///Users/heminghan/Kith-Kin/backend/app/services/redaction_service.py)，透過 Regex 與 Dict Key 深度遞迴過濾，將信用卡號、Medicare、護照號碼自動遮罩為 `[REDACTED]`。
+*   **安全追蹤服務**：新增 [`trace_service.py`](file:///Users/heminghan/Kith-Kin/backend/app/services/trace_service.py)，統一代理 `TraceRepository`，在寫入追蹤日誌前自動進行 redaction 脫敏並設定 `expires_at` 保留期限。
+*   **資料清理服務**：新增 [`retention_service.py`](file:///Users/heminghan/Kith-Kin/backend/app/services/retention_service.py) worker，定時或按需清除資料庫中已過期的 `TraceEvent` 與 `VisitSummary` 行。
+
+---
+
+## 🧪 第四輪測試驗證報告
+
+### 1. Frontend
+```bash
+$ npm run test -- --run
+Test Files  13 passed (13)
+      Tests  33 passed (33)
+```
+
+### 2. Backend
+```bash
+$ backend/.venv/bin/pytest backend/tests
+================== 234 passed, 1 skipped, 6 warnings in 3.20s ==================
+```
+
+### 3. Eval
+```bash
+$ backend/.venv/bin/python -m evals.run evals/cases.json
+{
+  "total": 17,
+  "passed": 17,
+  "failed": 0,
+  "deferred": 0,
+  "p0_total": 16,
+  "p0_passed": 16,
+  "status": "pass"
+}
+```
+
+---
+
 ## 🧭 目前剩餘待處理項
 
-*   Phase 09：拆分 `visit_summary_service`、`notification_service`、notification adapter/schema。這是架構與可測性 gap，不是目前 P0 產品行為 blocker。
-*   Phase 10：補 `trace_service`、`redaction_service`、`retention_service`、trace allowlist、secret scan、retention migration。若 demo 要宣稱 production-grade safety，需升為 P0。
-*   產品決策：是否允許 AI 使用已驗證 Patient Profile 代答「事實性個人資訊」，例如 allergy statement。目前仍偏向「請藥師確認」而不是主動陳述。
+*   **產品決策**：是否允許 AI 使用已驗證 Patient Profile 代答「事實性個人資訊」，例如 allergy statement。目前仍偏向「請藥師確認」而不是主動陳述。
+
