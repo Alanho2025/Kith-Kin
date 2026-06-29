@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "source": "sanitized Playwright pharmacy counter probe, 2026-06-29",
+  "binary_frame_count": 0,
+  "typed_transcripts": [
+    {
+      "utterance_id": "utt-typed-pharmacist-identity",
+      "declared_speaker": "pharmacist",
+      "observed_speaker": "parent",
+      "text": "Can you give me your birthday and name?"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "pharmacist",
+        "text": "Good morning. How are you today?"
+      }
+    },
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "parent",
+        "text": "Can you give me your birthday and name?"
+      }
+    },
+    {
+      "event_type": "translation.final",
+      "payload": {
+        "translated_text": "您能告诉我您的生日和姓名吗？"
+      }
+    },
+    {
+      "event_type": "cards.render",
+      "payload": {
+        "card_set": {
+          "cards": [
+            {
+              "zh_text": "确认我有在吃血压药赖诺普利并告诉药师我青霉素过敏",
+              "en_text": "The patient is currently taking Lisinopril and is allergic to Penicillin. Could you please note this?"
+            },
+            {
+              "zh_text": "让 KK 请药剂师写下药品名称和服用剂量",
+              "en_text": "Could you please write down the medicine name and dosage?"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "pharmacist",
+        "text": "I can show you three options. Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars and is for pain and inflammation, but please check with me if you take blood pressure medicine. Voltaren gel costs fifteen dollars and is for local muscle pain; do not apply it to broken skin."
+      }
+    },
+    {
+      "event_type": "card.confirmed",
+      "payload": {
+        "confirmation_id": "confirmation-nurofen-question",
+        "action_type": "show_to_pharmacist",
+        "card_text": "Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?"
+      }
+    },
+    {
+      "event_type": "audio.speaking",
+      "payload": {
+        "phase": "started"
+      }
+    },
+    {
+      "event_type": "audio.speaking",
+      "payload": {
+        "phase": "completed"
+      }
+    }
+  ],
+  "ui": {
+    "main_translation_visible": false,
+    "product_options_visible": false,
+    "summary_visible": false,
+    "conversation_log_snippets": [
+      "老人原话: 今天我能帮你什么？",
+      "医护人员: 您能告诉我您的生日和姓名吗？",
+      "医护人员: I can show you three options. Panadol costs eight dollars...",
+      "KK 代说: Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?"
+    ]
+  },
+  "summary": null
+}

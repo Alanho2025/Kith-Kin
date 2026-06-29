@@ -241,3 +241,52 @@ async def test_live_session_ignores_output_transcription_for_visual_track() -> N
             await asyncio.wait_for(anext(port.events()), timeout=0.05)
 
         await port.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "model_text",
+    [
+        "**Analyzing the Role-Play**",
+        "**Awaiting Further Input**",
+        "**Interpreting the User's Speech**",
+        "Hello, I am ready.",
+    ],
+)
+async def test_live_session_does_not_map_model_turn_text_to_input_transcript(
+    model_text: str,
+) -> None:
+    settings = Settings(google_api_key="dummy_key")
+    adapter = GeminiLiveAdapter(settings)
+    context = LiveSessionContext(
+        session_id=Path(__file__).name,
+        user_id=Path(__file__).name,
+        system_instruction="Test instruction",
+    )
+
+    mock_session = AsyncMock()
+    mock_session.receive = MagicMock()
+
+    async def mock_receive_gen():
+        yield types.LiveServerMessage(
+            server_content=types.LiveServerContent(
+                model_turn=types.Content(parts=[types.Part(text=model_text)])
+            )
+        )
+
+    mock_session.receive.return_value = mock_receive_gen()
+    mock_connect_cm = AsyncMock()
+    mock_connect_cm.__aenter__.return_value = mock_session
+    mock_connect_cm.__aexit__.return_value = None
+
+    with patch("google.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client.aio.live.connect.return_value = mock_connect_cm
+        mock_client_cls.return_value = mock_client
+
+        port = await adapter.open_session(context)
+        try:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(anext(port.events()), timeout=0.05)
+        finally:
+            await port.close()

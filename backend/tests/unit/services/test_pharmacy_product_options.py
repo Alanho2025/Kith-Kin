@@ -97,3 +97,40 @@ def test_tracker_builds_neutral_options_from_e16_pharmacist_options() -> None:
     )
     assert second["options"][1]["pharmacist_stated_cautions"] == "may irritate the stomach"
     assert second["options"][2]["price"] == "5 dollars"
+
+
+def test_tracker_builds_neutral_options_from_natural_counter_speech() -> None:
+    tracker = PharmacyProductOptionTracker()
+    session_id = "session-natural-counter"
+
+    snapshot = tracker.update(
+        session_id,
+        (
+            "I can show you three options. Panadol costs eight dollars and is for "
+            "pain and fever. Nurofen costs twelve dollars and is for pain and "
+            "inflammation, but please check with me if you take blood pressure "
+            "medicine. Voltaren gel costs fifteen dollars and is for local muscle "
+            "pain; do not apply it to broken skin."
+        ),
+    )
+
+    assert snapshot is not None
+    assert [option["name"] for option in snapshot["options"]] == [
+        "Panadol",
+        "Nurofen",
+        "Voltaren gel",
+    ]
+    assert [option["price"] for option in snapshot["options"]] == [
+        "8 dollars",
+        "12 dollars",
+        "15 dollars",
+    ]
+    assert snapshot["options"][0]["pharmacist_stated_use"] == "pain and fever"
+    assert snapshot["options"][1]["pharmacist_stated_use"] == "pain and inflammation"
+    assert snapshot["options"][1]["pharmacist_stated_cautions"] == (
+        "please check with me if you take blood pressure medicine"
+    )
+    assert snapshot["options"][2]["pharmacist_stated_use"] == "local muscle pain"
+    assert snapshot["options"][2]["pharmacist_stated_cautions"] == (
+        "do not apply it to broken skin"
+    )

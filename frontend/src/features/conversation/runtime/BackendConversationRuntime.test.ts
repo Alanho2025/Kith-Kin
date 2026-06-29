@@ -277,4 +277,84 @@ describe("BackendConversationRuntime", () => {
 
     startRecorderSpy.mockRestore();
   });
+
+  it("pauses microphone binary frames while sending typed pharmacist fallback text", async () => {
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
+    const pauseSpy = vi.spyOn(AudioRecorder.prototype, "pause").mockImplementation(() => {});
+    const resumeSpy = vi.spyOn(AudioRecorder.prototype, "resume").mockImplementation(() => {});
+    const startPlayerSpy = vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-typed", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-typed");
+    await Promise.resolve();
+    socket.emitOpen();
+    await connected;
+
+    runtime.setMicrophoneMode("pharmacist");
+    const beforeTyped = new ArrayBuffer(8);
+    sendAudio(beforeTyped);
+    await runtime.sendCommand({
+      eventType: "transcript.final",
+      payload: {
+        utteranceId: "utt-typed-fallback",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Can you give me your birthday and name?",
+        revision: 1,
+      },
+    });
+    sendAudio(new ArrayBuffer(8));
+
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(socket.sentBinary).toEqual([beforeTyped]);
+
+    startRecorderSpy.mockRestore();
+    pauseSpy.mockRestore();
+    resumeSpy.mockRestore();
+    startPlayerSpy.mockRestore();
+  });
+
+  it("surfaces ticket failures as a safe user-visible runtime error", async () => {
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new BackendConversationRuntime({
+      fetchFn: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ code: "APP_WS_ORIGIN_FORBIDDEN" }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+      socketFactory: () => new FakeSocket(),
+      baseUrl: "http://127.0.0.1:8000",
+    });
+    runtime.subscribe((event) => events.push(event));
+
+    await expect(runtime.connect("ses-ticket-403")).resolves.toBeUndefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        eventType: "error.show",
+        payload: expect.objectContaining({
+          code: "RUNTIME_TICKET_REQUEST_FAILED",
+          messageZh: expect.stringContaining("无法连接真实后端"),
+        }),
+      }),
+    );
+  });
 });

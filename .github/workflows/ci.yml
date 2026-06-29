@@ -35,7 +35,7 @@ jobs:
         working-directory: backend
         run: uv run pytest -q -p no:cacheprovider
 
-      - name: Eval contract (offline, enforces 15 cases)
+      - name: Eval contract (offline, enforces 17 cases)
         id: eval_contract
         working-directory: backend
         run: uv run python -m pytest ../evals/test_runner.py -q
@@ -91,10 +91,10 @@ jobs:
         working-directory: backend
         run: uv run python ../scripts/seed_demo_data.py --database-url sqlite+aiosqlite:///kithkin.db
 
-      - name: Real Gemini eval gate (15 cases)
+      - name: Real Gemini eval gate (17 cases)
         id: real_eval
         working-directory: backend
-        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
+        run: uv run python ../evals/run.py ../evals/cases.json --require-live-companion --report /tmp/eval_report.json
 
       - name: Playwright E2E Tests
         id: e2e

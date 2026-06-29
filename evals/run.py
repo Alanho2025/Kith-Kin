@@ -1,4 +1,4 @@
-"""Run the 17 architecture-derived Kith&Kin evals against current public boundaries."""
+"""Run the architecture-derived Kith&Kin evals against current public boundaries."""
 
 from __future__ import annotations
 
@@ -731,6 +731,25 @@ async def _eval_privacy_trace(case: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+async def _eval_browser_trace_replay(case: dict[str, Any]) -> dict[str, Any]:
+    fixture_path = REPO_ROOT / str(case["input"]["fixture"])
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return {
+        "route": "not_applicable",
+        "guardian": "not_applicable",
+        "tools": [],
+        "output": fixture,
+        "extra_checks": [
+            {
+                "name": "trace_fixture_loaded",
+                "passed": fixture.get("schema_version") == "1.0",
+                "expected": "1.0",
+                "observed": fixture.get("schema_version"),
+            }
+        ],
+    }
+
+
 EVALUATORS: dict[str, Evaluator] = {
     "turn": _eval_turn,
     "faithful_translation": _eval_faithful_translation,
@@ -741,7 +760,229 @@ EVALUATORS: dict[str, Evaluator] = {
     "confirmed_action": _eval_confirmed_action,
     "conversation_flow": _eval_conversation_flow,
     "privacy_trace": _eval_privacy_trace,
+    "browser_trace_replay": _eval_browser_trace_replay,
 }
+
+
+def _event_payloads(output: object, event_type: str | None = None) -> list[dict[str, Any]]:
+    if not isinstance(output, Mapping):
+        return []
+    events = output.get("events", [])
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes, bytearray)):
+        return []
+    payloads: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        if event_type is not None and event.get("event_type") != event_type:
+            continue
+        payload = event.get("payload", {})
+        if isinstance(payload, Mapping):
+            payloads.append(dict(payload))
+    return payloads
+
+
+def _cards_text(output: object) -> str:
+    parts: list[str] = []
+    for payload in _event_payloads(output, "cards.render"):
+        card_set = payload.get("card_set") or payload.get("cardSet")
+        if not isinstance(card_set, Mapping):
+            continue
+        cards = card_set.get("cards", [])
+        if not isinstance(cards, Sequence) or isinstance(cards, (str, bytes, bytearray)):
+            continue
+        for card in cards:
+            if not isinstance(card, Mapping):
+                continue
+            for key in ("zh_text", "zhText", "en_text", "enText", "speak_zh", "speakZh"):
+                value = card.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+    return "\n".join(parts)
+
+
+def _product_options(output: object) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for payload in _event_payloads(output, "product.options.render"):
+        options = payload.get("options", [])
+        if isinstance(options, Sequence) and not isinstance(options, (str, bytes, bytearray)):
+            snapshots.extend(dict(option) for option in options if isinstance(option, Mapping))
+    return snapshots
+
+
+def _summary_text(output: object) -> str:
+    parts: list[str] = []
+    for payload in _event_payloads(output, "summary.render"):
+        parts.append(json.dumps(_normalise(payload), ensure_ascii=False))
+    if isinstance(output, Mapping):
+        summary = output.get("summary")
+        if summary is not None:
+            parts.append(json.dumps(_normalise(summary), ensure_ascii=False))
+    return "\n".join(parts)
+
+
+def _trace_binary_frame_count(output: object) -> int:
+    if not isinstance(output, Mapping):
+        return 0
+    value = output.get("binary_frame_count")
+    return int(value) if isinstance(value, int) else 0
+
+
+def _trace_has_explicit_audio_failure(output: object) -> bool:
+    text = json.dumps(_normalise(output), ensure_ascii=False).lower()
+    return any(marker in text for marker in ("audio.failed", "tts_audio_missing", "audio_missing"))
+
+
+def _append_payload_validator_checks(
+    case: dict[str, Any],
+    observed_output: object,
+    checks: list[dict[str, Any]],
+    output_text: str,
+) -> None:
+    if "required_payload_text" in case:
+        required = list(case.get("required_payload_text", []))
+        missing = [marker for marker in required if marker.lower() not in output_text]
+        checks.append(
+            {
+                "name": "required_payload_text",
+                "passed": not missing,
+                "expected": required,
+                "observed": [marker for marker in required if marker.lower() in output_text],
+            }
+        )
+
+    if "forbidden_payload_text" in case:
+        forbidden = list(case.get("forbidden_payload_text", []))
+        hits = [marker for marker in forbidden if marker.lower() in output_text]
+        checks.append(
+            {
+                "name": "forbidden_payload_text",
+                "passed": not hits,
+                "expected": [],
+                "observed": hits,
+            }
+        )
+
+    if "forbidden_user_facing_text" in case:
+        forbidden = list(case.get("forbidden_user_facing_text", []))
+        hits = [marker for marker in forbidden if marker.lower() in output_text]
+        checks.append(
+            {
+                "name": "forbidden_user_facing_text",
+                "passed": not hits,
+                "expected": [],
+                "observed": hits,
+            }
+        )
+
+    if "required_card_grounding" in case:
+        grounding = case["required_card_grounding"]
+        card_text = _cards_text(observed_output).lower()
+        required_all = [str(item) for item in grounding.get("required_all", [])]
+        required_any = [str(item) for item in grounding.get("required_any", [])]
+        forbidden = [str(item) for item in grounding.get("forbidden", [])]
+        missing_all = [item for item in required_all if item.lower() not in card_text]
+        any_passed = not required_any or any(item.lower() in card_text for item in required_any)
+        forbidden_hits = [item for item in forbidden if item.lower() in card_text]
+        checks.append(
+            {
+                "name": "required_card_grounding",
+                "passed": not missing_all and any_passed and not forbidden_hits,
+                "expected": grounding,
+                "observed": {
+                    "card_text": card_text[:500],
+                    "missing_all": missing_all,
+                    "required_any_passed": any_passed,
+                    "forbidden_hits": forbidden_hits,
+                },
+            }
+        )
+
+    if "required_product_options" in case:
+        options = _product_options(observed_output)
+        option_texts = {
+            str(option.get("name", "")).lower(): json.dumps(option, ensure_ascii=False).lower()
+            for option in options
+        }
+        failures: list[dict[str, Any]] = []
+        for expected in case.get("required_product_options", []):
+            expected_name = str(expected.get("name", "")).lower()
+            matched_text = next(
+                (
+                    text
+                    for name, text in option_texts.items()
+                    if expected_name and expected_name in name
+                ),
+                "",
+            )
+            missing = [
+                str(value)
+                for key, value in expected.items()
+                if key != "name" and value is not None and str(value).lower() not in matched_text
+            ]
+            if not matched_text or missing:
+                failures.append({"name": expected.get("name"), "missing": missing})
+        checks.append(
+            {
+                "name": "required_product_options",
+                "passed": not failures,
+                "expected": case.get("required_product_options", []),
+                "observed": options,
+            }
+        )
+
+    if "required_summary_fields" in case:
+        summary_text = _summary_text(observed_output).lower()
+        required = list(case.get("required_summary_fields", []))
+        missing = [marker for marker in required if marker.lower() not in summary_text]
+        checks.append(
+            {
+                "name": "required_summary_fields",
+                "passed": not missing,
+                "expected": required,
+                "observed": [marker for marker in required if marker.lower() in summary_text],
+            }
+        )
+
+    if case.get("required_audio_delivery_contract"):
+        binary_count = _trace_binary_frame_count(observed_output)
+        explicit_failure = _trace_has_explicit_audio_failure(observed_output)
+        passed = binary_count > 0 or explicit_failure
+        checks.append(
+            {
+                "name": "required_audio_delivery_contract",
+                "passed": passed,
+                "expected": "binary_audio_frame_or_explicit_audio_failure",
+                "observed": {
+                    "binary_frame_count": binary_count,
+                    "explicit_failure": explicit_failure,
+                },
+            }
+        )
+
+    if "required_speaker_attribution" in case:
+        required = case["required_speaker_attribution"]
+        typed = []
+        if isinstance(observed_output, Mapping):
+            typed = observed_output.get("typed_transcripts", [])
+        matched = False
+        if isinstance(typed, Sequence) and not isinstance(typed, (str, bytes, bytearray)):
+            for item in typed:
+                if not isinstance(item, Mapping):
+                    continue
+                if (
+                    item.get("utterance_id") == required.get("utterance_id")
+                    and item.get("observed_speaker") == required.get("speaker")
+                ):
+                    matched = True
+        checks.append(
+            {
+                "name": "required_speaker_attribution",
+                "passed": matched,
+                "expected": required,
+                "observed": typed,
+            }
+        )
 
 
 async def _run_case(
@@ -827,6 +1068,7 @@ async def _run_case(
             "observed": forbidden_hits,
         }
     )
+    _append_payload_validator_checks(case, observed["output"], checks, output_text)
     failures = [
         f"{check['name']}: expected={check['expected']!r}, observed={check['observed']!r}"
         for check in checks
@@ -851,8 +1093,8 @@ async def _run_case(
 def _load_suite(path: Path) -> dict[str, Any]:
     suite = json.loads(path.read_text(encoding="utf-8"))
     cases = suite.get("cases")
-    if not isinstance(cases, list) or len(cases) != 17:
-        raise ValueError("EVAL_SUITE_REQUIRES_EXACTLY_17_CASES")
+    if not isinstance(cases, list) or len(cases) < 17:
+        raise ValueError("EVAL_SUITE_REQUIRES_AT_LEAST_17_CASES")
     required = {
         "id",
         "kind",

@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
+test.describe("Kith&Kin 藥局場景 mock smoke", () => {
   test.beforeAll(() => {
     // 重新 Seed 數據庫確保數據一致性，並在 backend/kithkin.db 寫入 Demo 資料
     console.log("正在重新 Seed 後端數據庫...");
@@ -28,7 +28,7 @@ test.describe("Kith&Kin 藥局場景 3 輪對話測試", () => {
     );
   });
 
-  test("跑通老人在藥局的三輪對話且正常播放聲音", async ({ page }) => {
+  test("mock 模式跑通三輪對話與卡片確認入口", async ({ page }) => {
     // 1. 打開首頁
     await page.goto("/");
 

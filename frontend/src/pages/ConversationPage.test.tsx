@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MockConversationRuntime } from "../features/conversation/runtime/MockConversationRuntime";
@@ -8,6 +8,32 @@ import type { RuntimeCommandView } from "../features/conversation/viewModels";
 
 
 describe("ConversationPage", () => {
+  function runtimeEvent(eventType: string, eventId: string, sequence: number, payload: object) {
+    return {
+      schemaVersion: "0.1",
+      eventId,
+      eventType,
+      sessionId: "ses-page",
+      sequence,
+      timestamp: "2026-06-22T00:00:00Z",
+      correlationId: null,
+      payload,
+    };
+  }
+
+  function translationEvent(eventId: string, sequence: number, translatedText: string) {
+    return runtimeEvent("translation.final", eventId, sequence, {
+      sourceTranscriptEventId: "evt-source-page",
+      segmentId: `seg-${eventId}`,
+      sourceLanguage: "en",
+      targetLanguage: "zh_cn",
+      translatedText,
+      mode: "faithful",
+      appendOnly: true,
+      latencyMs: 10,
+    });
+  }
+
   it("renders elder-first voice controls and conversation log", async () => {
     const runtime = new MockConversationRuntime(mockFallbackFlow);
     render(<ConversationPage runtime={runtime} sessionId="ses-controls" />);
@@ -273,6 +299,166 @@ describe("ConversationPage", () => {
     expect(screen.getByText("usually used for pain or fever")).toBeInTheDocument();
     expect(screen.getByText("two tablets every six hours if suitable")).toBeInTheDocument();
     expect(screen.queryByText(/best option/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show confirmed response-card text as a KK speech turn in the conversation log", async () => {
+    const cardText =
+      "Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?";
+    const cardFlow = [
+      runtimeEvent("transcript.final", "evt-card-log-source", 1, {
+        utteranceId: "utt-card-log-source",
+        speaker: "pharmacist",
+        language: "en",
+        text: "I can show you three options.",
+        revision: 1,
+      }),
+      translationEvent("evt-card-log-translation", 2, "我可以给你看三个选项。"),
+      runtimeEvent("cards.render", "evt-card-log-render", 3, {
+        cardSet: {
+          cardSetId: "set-card-log",
+          revision: 1,
+          cards: [
+            {
+              cardId: "card-log-1",
+              zhText: "我想确认布洛芬是否和我的降压药赖诺普利有冲突？",
+              enText: cardText,
+              riskLevel: "medical",
+              actionType: "show_to_pharmacist",
+            },
+          ],
+        },
+      }),
+      runtimeEvent("card.selected", "evt-card-log-selected", 4, {
+        cardSetId: "set-card-log",
+        cardId: "card-log-1",
+        confirmationId: "confirmation-card-log",
+      }),
+      runtimeEvent("card.confirmed", "evt-card-log-confirmed", 5, {
+        confirmationId: "confirmation-card-log",
+        actionType: "show_to_pharmacist",
+        replayed: false,
+      }),
+    ];
+
+    render(<ConversationPage runtime={new MockConversationRuntime(cardFlow)} sessionId="ses-card-log" />);
+
+    await screen.findByText("我可以给你看三个选项。");
+    expect(screen.queryAllByText("KK 代说")).toHaveLength(0);
+    expect(screen.queryAllByText(cardText)).toHaveLength(0);
+  });
+
+  it("keeps the latest faithful translation visible after route decisions, card renders, and listening resumes", async () => {
+    const translatedText =
+      "我可以给你看三个选项：Panadol 八美元用于疼痛和发烧，Nurofen 十二美元用于疼痛和炎症。";
+    const flow = [
+      runtimeEvent("transcript.final", "evt-retain-source", 1, {
+        utteranceId: "utt-retain-source",
+        speaker: "pharmacist",
+        language: "en",
+        text:
+          "I can show you three options. Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars.",
+        revision: 1,
+      }),
+      translationEvent("evt-retain-translation", 2, translatedText),
+      runtimeEvent("route.decision", "evt-retain-route", 3, {
+        sourceTranscriptEventId: "evt-retain-source",
+        routeType: "pharmacy_risk",
+        confidence: 0.9,
+        reasonCode: "pharmacy_term",
+      }),
+      runtimeEvent("cards.render", "evt-retain-cards", 4, {
+        cardSet: {
+          cardSetId: "set-retain",
+          revision: 1,
+          cards: [
+            {
+              cardId: "card-retain-1",
+              zhText: "请药师写下药品名称和剂量。",
+              enText: "Could you please write down the product names and doses?",
+              riskLevel: "normal",
+              actionType: "speak",
+            },
+          ],
+        },
+      }),
+      runtimeEvent("audio.listening", "evt-retain-listening", 5, { active: true }),
+    ];
+
+    render(<ConversationPage runtime={new MockConversationRuntime(flow)} sessionId="ses-retain" />);
+
+    const subtitle = await screen.findByLabelText("忠实中文翻译");
+    expect(within(subtitle).getByText(translatedText)).toBeInTheDocument();
+    expect(subtitle).not.toHaveTextContent("中文翻译会显示在这里");
+  });
+
+  it("keeps product options in the main workspace with the translation after product.options.render", async () => {
+    const translatedText =
+      "药师说 Panadol 八美元用于疼痛和发烧；Nurofen 十二美元用于疼痛和炎症，但服用降压药时要先询问。";
+    const flow = [
+      runtimeEvent("transcript.final", "evt-products-natural-source", 1, {
+        utteranceId: "utt-products-natural",
+        speaker: "pharmacist",
+        language: "en",
+        text:
+          "I can show you three options. Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars and is for pain and inflammation, but please check with me if you take blood pressure medicine.",
+        revision: 1,
+      }),
+      translationEvent("evt-products-natural-translation", 2, translatedText),
+      runtimeEvent("product.options.render", "evt-products-natural-table", 3, {
+        options: [
+          {
+            name: "Panadol",
+            price: "8 dollars",
+            pharmacistStatedUse: "pain and fever",
+            pharmacistStatedDirections: null,
+            pharmacistStatedCautions: null,
+          },
+          {
+            name: "Nurofen",
+            price: "12 dollars",
+            pharmacistStatedUse: "pain and inflammation",
+            pharmacistStatedDirections: null,
+            pharmacistStatedCautions: "check with me if you take blood pressure medicine",
+          },
+        ],
+      }),
+    ];
+
+    render(<ConversationPage runtime={new MockConversationRuntime(flow)} sessionId="ses-products-main" />);
+
+    const subtitle = await screen.findByLabelText("忠实中文翻译");
+    expect(within(subtitle).getByText(translatedText)).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "药师说的产品选项" })).toBeInTheDocument();
+    expect(screen.getByText("Panadol")).toBeInTheDocument();
+    expect(screen.getByText("8 dollars")).toBeInTheDocument();
+    expect(screen.getByText("check with me if you take blood pressure medicine")).toBeInTheDocument();
+  });
+
+  it("returns to a stable listening state after passive translation without cards", async () => {
+    const translatedText = "早上好。你今天怎么样？";
+    const flow = [
+      runtimeEvent("transcript.final", "evt-passive-source", 1, {
+        utteranceId: "utt-passive-source",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Good morning. How are you today?",
+        revision: 1,
+      }),
+      translationEvent("evt-passive-translation", 2, translatedText),
+      runtimeEvent("route.decision", "evt-passive-route", 3, {
+        sourceTranscriptEventId: "evt-passive-source",
+        routeType: "passive_translation",
+        confidence: 0.96,
+        reasonCode: "routine_translation",
+      }),
+    ];
+
+    render(<ConversationPage runtime={new MockConversationRuntime(flow)} sessionId="ses-passive" />);
+
+    const subtitle = await screen.findByLabelText("忠实中文翻译");
+    expect(within(subtitle).getByText(translatedText)).toBeInTheDocument();
+    expect(screen.getByText("Voice Ready")).toBeInTheDocument();
+    expect(screen.queryByText("KK 正在帮您确认")).not.toBeInTheDocument();
   });
 
   it("filters out system reasoning from subtitles and logs in user mode", async () => {

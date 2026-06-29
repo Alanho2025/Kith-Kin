@@ -161,12 +161,18 @@ npx playwright test
 ```
 
 ### 4. Agent Evals
-Run the 15 canonical agent and safety acceptance evals (validating routing, safety boundaries, prompt injection, and tool trajectory):
+Run the 17 canonical agent and safety acceptance evals (validating routing, safety boundaries, prompt injection, and tool trajectory):
 ```bash
-# From the repository root directory
-export GOOGLE_API_KEY=$(grep GOOGLE_API_KEY backend/.env | cut -d '=' -f 2-)
-export GEMINI_API_KEY=$GOOGLE_API_KEY
+# From the repository root directory, after backend setup.
+# Fast offline contract check: validates the executable suite shape.
+backend/.venv/bin/python -m pytest evals/test_runner.py -q
+
+# Deterministic eval run. This does not require a Google API key.
 backend/.venv/bin/python -m evals.run evals/cases.json
+
+# Optional live Companion eval run. Requires GOOGLE_API_KEY in backend/.env.
+export GOOGLE_API_KEY=$(grep '^GOOGLE_API_KEY=' backend/.env | cut -d '=' -f 2-)
+backend/.venv/bin/python -m evals.run evals/cases.json --require-live-companion
 ```
 
 ### 5. Quality & Lint Gates

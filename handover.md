@@ -285,3 +285,298 @@ $ backend/.venv/bin/python -m evals.run evals/cases.json
 
 *   **產品決策**：是否允許 AI 使用已驗證 Patient Profile 代答「事實性個人資訊」，例如 allergy statement。目前仍偏向「請藥師確認」而不是主動陳述。
 
+---
+
+## 🔴 第五輪實跑 QA 發現 — Pharmacy Counter E2E 與產品目標 Gap (2026-06-29)
+
+本輪不是 mock test，而是依照 `docs/pharmacy_counter_e2e_product_goal.md` 用真 Chrome、真 backend、真 Gemini API 實際跑一遍藥局櫃檯流程。藥師端使用 UI 的文字 fallback 輸入英文。實跑證據：
+
+*   Playwright report：`output/playwright/2026-06-29T08-33-13-044Z-pharmacy-e2e-report.json`
+*   主要截圖：
+    *   `output/playwright/2026-06-29T08-33-13-044Z-05-help-question.png`
+    *   `output/playwright/2026-06-29T08-33-13-044Z-09-three-options.png`
+    *   使用者提供截圖：`Screenshot 2026-06-29 at 8.36.01 PM.png`、`Screenshot 2026-06-29 at 8.36.46 PM.png`
+*   事件摘要：
+    *   `wsReceivedJson`: 57
+    *   `wsReceivedBinaryFrames`: 0
+    *   `translations`: 8
+    *   `cardsRendered`: 4
+    *   `productOptionsRendered`: 0
+    *   `confirmations`: 1
+    *   `fallbacks`: 0
+    *   `pageErrors`: 0
+
+### P0 — 對話內容流斷裂，聊天欄混入卡片內容
+
+*   **問題**：聊天欄中的 `KK 代说` 目前不是 Gemini 實際說出的內容，也不是 TTS 播放後的 transcript，而是 `card.confirmed` 時前端直接把卡片 `enText` / `speakZh` append 到 conversation log。
+*   **實跑現象**：即使本輪沒有收到任何 audio binary frame，右側對話欄仍顯示 `KK 代说`：
+    *   中文：`我想确认一下，布洛芬（Nurofen）是否会和我的降压药赖诺普利（Lisinopril）有冲突？`
+    *   英文：`Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?`
+*   **產品影響**：conversation log 應該是真實對話紀錄；現在它混入「被確認的卡片內容」，造成使用者看到的對話很割裂，好像 KK 已經插話，但實際上只是卡片 UI 狀態。
+*   **應修方向**：
+    *   proposed card 不進 conversation log。
+    *   confirmed card 也不應直接進 conversation log；只有在後端明確回傳「已送出播放」且 TTS audio 成功或 action succeeded 後，才可記成 `KK 代說`。
+    *   卡片選擇、確認、取消應放在獨立 action trail / state history，不污染 conversation turn history。
+
+### P0 — Gemini TTS 沒有實際出聲
+
+*   **問題**：後端送出 `audio.muted` 與 `audio.speaking started/completed`，但 browser WebSocket 沒收到任何 binary PCM audio frame。
+*   **實跑證據**：`wsReceivedBinaryFrames = 0`，AudioContext 沒有任何 `bufferSource.start` 播放事件。
+*   **產品影響**：不符合目標「確認卡片後 KK speaks the confirmed card to the pharmacist」，也不符合本輪驗收要求「要能夠聽到 Gemini 說的話」。
+*   **可能原因**：`GeminiLiveAdapter.send_text()` 送 text 後，provider 回了 transcript/thought-like server content，但沒有回 `inline_data` audio；需要檢查 Live model、`response_modalities=["AUDIO"]`、`send_client_content` 的用法與 Live session role/config。
+
+### P0 — Gemini Live 內部推理/狀態文字進入 transcript/translation/card pipeline
+
+*   **問題**：Live provider 回傳了模型內部狀態文字，後端當成藥師 transcript 處理。
+*   **實跑出現內容**：
+    *   `**Interpreting the User's Speech** ...`
+    *   `**Analyzing the Role-Play** ...`
+    *   `**Awaiting Further Input** ...`
+*   **產品影響**：
+    *   這些內容被翻譯成中文，甚至觸發 route/card generation。
+    *   使用者模式雖有前端 filter，但資料已污染 backend buffer、route decision、cards 和 summary input。
+*   **應修方向**：
+    *   provider adapter 層先 fail-closed 過濾 model thought/status text，不應只靠前端 hide。
+    *   transcript source 必須只接受真實 input transcription，不接受 model text parts 當藥師/老人 transcript。
+
+### P0 — 卡片回答沒有緊貼藥師當下問題
+
+*   **問題**：卡片內容常跳到 profile 或 agent 推導出的 next best question，而不是回答/追問藥師剛剛問的問題。
+*   **實跑例子**：
+    *   藥師問生日和姓名時，卡片生成 identity confirmation 類內容。
+    *   藥師問 allergies / blood pressure medicine 時，卡片直接打包 `Lisinopril + Penicillin allergy` disclosure。
+    *   藥師提供三個產品後，卡片直接跳成 `Could you please confirm if Nurofen has an interaction with my blood pressure medicine, Lisinopril?`
+*   **使用者觀感**：卡片像 agent 自己插話，不像老人此刻自然會對藥師說的一句話。
+*   **應修方向**：
+    *   卡片必須 grounded 到 latest pharmacist turn。
+    *   若需要使用 profile context，卡片要明確是「請藥師核對」，不要替 AI 下結論。
+    *   對 profile disclosure 建議一張卡只揭露一類事實，避免把 medication + allergy 一次打包。
+
+### P0 — Speaker attribution 仍會錯位
+
+*   **問題**：typed pharmacist fallback 送出的 transcript 可能被後端 current speaker 覆蓋。
+*   **實跑現象**：`What can I help you with today?` 是藥師文字輸入，但右側 log 顯示為 `老人原话`。
+*   **產品影響**：對話紀錄的 speaker 錯位會污染後續 route/card/summary，也讓使用者回看時不可信。
+*   **應修方向**：
+    *   明確區分 typed fallback 的 declared speaker 與 microphone speaker state。
+    *   `_handle_transcript_provider_event` 不應無條件用 `_speaker_sessions[session_id]` 覆蓋 client-sent `TranscriptFinalEvent.payload.speaker`。
+
+### P0 — 三產品中立比較表沒有渲染
+
+*   **問題**：藥師提供三個產品、價格、用途、注意事項後，沒有產生 `product.options.render`。
+*   **實跑輸入**：
+    *   `Panadol costs eight dollars and is for pain and fever.`
+    *   `Nurofen costs twelve dollars and is for pain and inflammation...`
+    *   `Voltaren gel costs fifteen dollars and is for local muscle pain...`
+*   **實跑結果**：`productOptionsRendered = 0`。
+*   **原因**：`PharmacyProductOptionTracker` 目前仍偏 template parser，只吃 `three options:`、`This one is...`、`price is ... dollars` 等狹窄話術；自然說法 `costs eight dollars` 不會觸發。
+*   **產品影響**：不符合目標「neutral comparison view: product name, price, pharmacist-stated purpose, directions, cautions」。
+
+### P0 — 主工作區丟失最重要翻譯，只剩右側 log
+
+*   **問題**：三產品說明後，左側老人主要看的區域顯示大片空白與 `等待药剂师说话 / 中文翻译会显示在这里`，右側 log 才看得到三產品翻譯。
+*   **使用者截圖**：`Screenshot 2026-06-29 at 8.36.46 PM.png` 清楚顯示左側空白、右側才有產品資訊。
+*   **產品影響**：不符合 success criteria「parent sees large, faithful Chinese translations of pharmacist speech」。
+*   **應修方向**：
+    *   主翻譯區應保留最近一段 final translation，直到下一段真實 speech partial/final 到來。
+    *   不應在 status 回到 listening 時清空最重要的 final translation。
+
+### P1 — 真後端模式用 `127.0.0.1` 會 ticket 403
+
+*   **問題**：Vite 顯示 `http://127.0.0.1:5173/` 可用，但 backend `cors_allowed_origins` 預設只允許 `http://localhost:5173`。
+*   **實跑現象**：
+    *   使用 `127.0.0.1` 打開時，`POST /api/sessions/{id}/ticket` 回 `403 TICKET_SCOPE_INVALID`。
+    *   前端 console 出現 unhandled `RUNTIME_TICKET_REQUEST_FAILED` / `RUNTIME_DISCONNECTED`。
+*   **應修方向**：
+    *   local dev 預設允許 `localhost:5173` 與 `127.0.0.1:5173`。
+    *   前端應對 ticket failure 顯示可理解錯誤，不要 silent fallback 或 unhandled rejection。
+
+### P1 — Typed fallback 與 microphone path 沒有隔離，會污染 Live session
+
+*   **問題**：即使用文字輸入藥師內容，前端仍可能因 active mic state / AudioRecorder 傳送 binary frames 到 Live session。
+*   **實跑現象**：report 的 sent events 有大量 binary frames，隨後 Gemini Live 產生不相關 transcript，例如生日姓名與 role-play 分析。
+*   **產品影響**：文字 fallback 本應是 deterministic debugging path；現在它和 mic audio 混在一起，導致對話內容不可控。
+*   **應修方向**：
+    *   使用 typed fallback 時暫停/關閉 microphone audio frames。
+    *   transcript injection path 應 bypass provider Live audio input，避免被 background audio / self echo 影響。
+
+### P1 — 卡片文字仍有第三人稱或 action-label 味道
+
+*   **問題**：部分卡片不是老人可直接對藥師說的自然 utterance。
+*   **例子**：
+    *   `The patient is currently taking Lisinopril and is allergic to Penicillin. Could you please note this?`
+    *   `确认我有在吃血壓藥赖诺普利并对药师说我青霉素过敏`
+    *   `让 KK 请药剂师写下药品名称和服用剂量`
+*   **產品目標要求**：卡片應是 direct utterance，例如 `I have a recorded allergy. Could you please check whether this option is suitable?`
+*   **應修方向**：分離 parent-facing option label 和 pharmacist-facing utterance，但 conversation/action state 不要把 label 混成實際說話內容。
+
+### P1 — Visit summary 沒有出現
+
+*   **問題**：點擊 `结束` 後等待 30 秒，沒有收到 `summary.render`。
+*   **實跑證據**：`summary.render` wait timeout。
+*   **產品影響**：不符合目標 step 24「generates a visit summary: medicine names mentioned, pharmacist-stated advice, unresolved questions, and family follow-up if confirmed」。
+*   **待確認**：是 Playwright 沒有成功接受 `window.confirm`，還是 backend session end / summary path 沒有跑通；需要補一個 deterministic browser test。
+
+### P1 — Purchase decision / payment flow 尚未 E2E 跑通
+
+*   **問題**：本輪實跑只到三產品與一張 follow-up card，沒有完成：
+    *   parent chooses what to buy
+    *   Kith&Kin translates purchase intent
+    *   pharmacist gives final price/payment instructions
+    *   parent confirms purchase
+    *   conversation ends with summary
+*   **產品影響**：目前不能算完整 Pharmacy Counter E2E。
+
+### P2 — 無卡片/被動翻譯狀態缺少清楚的 UI terminal state
+
+*   **問題**：small talk 正確沒有出卡，但 UI 狀態和 automation 都不容易知道「本輪只需翻譯，沒有卡片」。
+*   **產品影響**：老人可能看到狀態停在 `正在识别语音` / `KK 正在帮您确认` 一段時間，不清楚是否還在等。
+*   **應修方向**：`route.decision: passive_translation` 後前端應明確回到 stable listening state，並保留剛完成的翻譯。
+
+### 當前整體 Gap 評估
+
+相對於 `Pharmacy Counter E2E Product Goal`，目前真後端實跑約完成 **40-45%**：
+
+*   已有：session 建立、藥師英文轉中文、部分卡片生成、parent confirmation event、部分 profile context retrieval。
+*   未達標：Gemini audible TTS、真實對話 log、一致 speaker attribution、卡片 grounding、三產品中立比較、purchase flow、visit summary。
+*   下一輪建議優先級：
+    1.   修 Live adapter：不要讓 model text/thought 進 transcript，並讓 confirmed card 真正產生 audio binary frames。
+    2.   修 conversation log 資料模型：conversation turns 只記真實 speech/translation，card lifecycle 另存 action trail。
+    3.   修 typed fallback speaker/mic isolation。
+    4.   擴充 product option parser 或改成 schema extraction，支援自然藥師話術。
+    5.   補真 browser E2E：生日/姓名問題、安全問題、三產品、confirm card、audio frame、summary。
+
+---
+
+## 🧪 第五輪 Test / Eval 失敗分析與補測計畫 (2026-06-29)
+
+這次最大的教訓：現有 test / eval 數量不少，但大多驗證的是 **fixture path / mock path / template wording**，沒有驗證真產品使用流。結果是 eval 顯示 `17/17 pass`、後端/前端測試全綠，但真 Chrome + 真 backend + Gemini 實跑仍然暴露 P0 問題。這是測試策略失敗，下一輪必須把每個產品 bug 轉成 fail-first test gap。
+
+### Root Cause：為什麼現有測試沒有抓到
+
+*   **Eval 太接近 implementation fixture**：
+    *   `conversation_flow` eval 直接把 `ProviderTranscriptEvent` 丟進 runtime，不經 browser、WebSocket ticket、typed fallback、mic state、Gemini Live session。
+    *   E16 三產品 eval 用的是 template phrase：`three options: Panadol which is...`，不是自然藥師說法 `Panadol costs eight dollars and is for pain and fever`。
+    *   `expected_flow_events` 只檢查 event type 有沒有出現，沒有檢查 UI 是否真的顯示、主工作區是否保留翻譯、聊天欄是否被卡片污染。
+*   **Audio eval 驗證錯層**：
+    *   E10 `audio_half_duplex` 只跑 `AudioPlaybackCoordinator` fake sink，檢查 `audio.frame` 事件順序。
+    *   真產品用的是 `LiveRuntimeService` + `GeminiLiveAdapter` + WebSocket binary frame；這條路沒有被 eval 驗證。
+    *   `test_card_confirmation_is_the_only_path_that_requests_english_audio` 只斷言 `port.send_text()` 被呼叫，沒有斷言 provider audio frame 真的回到 browser。
+*   **前端測試把錯行為鎖成正確行為**：
+    *   `frontend/src/features/conversation/reducer.test.ts` 目前期待 `card.confirmed` 直接新增 `speaker: "kk"` 的 turn。
+    *   真實產品上這就是割裂感來源：卡片確認狀態被寫成對話內容。
+*   **UI reasoning filter 只測前端隱藏，不測 backend 污染**：
+    *   `ConversationPage.test.tsx` 測 `**Awaiting further instructions**` 在 user mode 不顯示。
+    *   但真問題是 provider thought/status text 已經進 backend buffer、translation、route、cards；前端 hide 太晚。
+*   **E2E 測的是 mock default，而不是真 backend**：
+    *   `frontend/e2e/pharmacy-dialogue.spec.ts` 點 `开始药房对话` 後使用預設 Mock 模式，沒有切到 `真实后端 (Backend)`。
+    *   它沒有驗證 ticket、Gemini Live、typed fallback、audio binary frame、summary、產品比較表自然語句。
+*   **沒有 golden trace / replay 驗收**：
+    *   這次真跑已產生 `output/playwright/2026-06-29T08-33-13-044Z-pharmacy-e2e-report.json`，但 CI/eval 沒有把這種 trace 當 artifact 重新驗收。
+    *   目前沒有「真實 QA trace 必須被 tests replay 並失敗」的機制。
+
+### Test Gap Matrix：所有已知問題必須轉成測試
+
+| 問題 | 現有測試為何沒抓到 | 必補 test / eval | Pass / Fail 標準 |
+|---|---|---|---|
+| 聊天欄 `KK 代说` 顯示卡片內容，不是 AI 實際說話 | reducer test 反而期待 `card.confirmed` 直接 append `kk` turn | Frontend reducer fail-first：`card.confirmed` 不新增 conversation turn；只有 `speech.delivered` / `card.action.status succeeded with audio_delivery_id` 才可新增 `kk` turn | `card.confirmed` 後 `turns.length` 不變；action trail 有 confirmation record |
+| 卡片 lifecycle 污染 conversation log | 目前沒有 action trail vs conversation turn 的模型測試 | Frontend state model test：card select/confirm/cancel 都進 `actions`，不進 `turns` | conversation log 只含 pharmacist / parent / delivered KK speech |
+| Gemini TTS 無 binary audio frame | E10 只測 fake coordinator；backend test 只測 `send_text` 被呼叫 | Backend live transport test：confirm card 後 mock provider 必須送 `ProviderAudioEvent`，WebSocket 必須收到 binary frame；若 provider 無 audio，不能標 completed | confirmed -> muted -> speaking started -> binary frame >= 1 -> speaking completed |
+| Browser 端聽不到 Gemini | 沒有 browser-level audio instrumentation | Playwright real-backend smoke：攔 WebSocket binary frame、AudioContext `bufferSource.start`，assert frame > 0 且播放 start > 0 | `wsReceivedBinaryFrames > 0` 且 audio start event 存在 |
+| Provider thought/status text 進 transcript | 前端只測 hide；backend adapter 沒測阻擋 | Adapter unit test：`model_turn.parts[].text` containing `**Analyzing...**` / `**Awaiting...**` 不可 map 成 `ProviderTranscriptEvent` | queue 不產生 transcript.final；可產生 diagnostic-only event 或丟棄 |
+| Thought text 觸發 route/cards | 沒有 runtime negative test | Backend runtime integration：輸入 provider thought/status event 後，不得出 `translation.final` / `route.decision` / `cards.render` | thought text 不進 replay buffer 的 user-facing events |
+| 卡片回答跳 topic，沒有貼藥師當下問題 | eval 只看有 cards.render，不看 card 是否 grounded | New eval `card_grounding_latest_turn`：每張卡必須引用/回應 latest pharmacist turn 的 intent；不得從 profile 自行跳到 unrelated medicine unless latest turn asks safety/profile | 藥師問生日姓名，只能生成身份核對/請寫下/慢一點，不得生成 medication/allergy cards |
+| Safety disclosure 一次打包 medication + allergy | E04 只驗證 confirmation-gated，不驗證 disclosure granularity | Backend agent test：藥師問 allergy+medication 時，profile fact cards 必須拆成單一 disclosure 或 checklist confirmation，不可一張卡混兩類敏感 facts | 一張 outward health disclosure card 只含一個 fact group，或明確 checklist UI |
+| Speaker attribution 被 current mic mode 覆蓋 | 只測 speaker_changed 對 provider audio transcription；沒測 typed transcript | Backend runtime test：先 `audio.speaker_changed(parent)`，再 client `transcript.final(speaker=pharmacist)`，輸出 speaker 必須仍是 pharmacist | client-declared typed speaker 不被 `_speaker_sessions` 覆蓋 |
+| Typed fallback 與 mic audio 混線 | 沒有測文字 fallback 時 binary frame 是否停止 | Frontend runtime test + Playwright：提交 typed pharmacist text 時 recorder paused，不送 audio binary frames | typed submission window 內 `ws.sent` binary frame = 0 |
+| 127.0.0.1 ticket 403 | Vite test 只測 proxy 保留 Origin，沒有測 allowed origins | Config/API integration test：`http://127.0.0.1:5173` 和 `http://localhost:5173` 都可 issue ticket in dev | 兩個 origin ticket status 都是 201 |
+| Ticket failure 無 user-facing error | 前端沒有 negative ticket test | Frontend BackendConversationRuntime / AppRouter test：ticket 403 顯示中文錯誤，不進 fallback fake session | UI 顯示可恢復錯誤；不 silent started |
+| 三產品自然語句不產生比較表 | parser tests 用 template wording | Unit test：`Panadol costs eight dollars and is for pain and fever...` 產出三個 options | options 包含 name/price/use/caution，且無推薦排序 |
+| E16 eval 沒覆蓋自然藥師話術 | E16 input 太模板化 | 修改 E16 或新增 E18：使用真跑自然句；required payload fields 檢查 `Panadol/$8/pain and fever/Nurofen caution/Voltaren caution` | 必須有 `product.options.render` 且 payload facts 完整 |
+| 主工作區清空最新翻譯 | 現有 UI test 只看 log/table，不看主區保留 | Frontend component test：`translation.final` 後收到 `route.decision/cards/audio.listening`，主 subtitle 仍顯示 latest final translation | 主區仍顯示三產品中文，不回到 placeholder |
+| 三產品只在右側 log，不在主區 | Browser E2E 沒截圖/locator 比對主區 | Playwright test：三產品 turn 後左側 `aria-label=忠实中文翻译` 包含 Panadol/Nurofen/Voltaren 中文 | 主工作區可見完整最近翻譯 |
+| 卡片仍有第三人稱 / action-label 味道 | tests 容許 `The patient...`、`让 KK...` | Guardian / card schema tests：block or reject `The patient`, `Ask pharmacist`, `让 KK`, `请 KK`, `tell the pharmacist` action-label text in direct utterance fields | `en_text` 必須是第一人稱/直接禮貌問句；`zh_text` 可是 label 但不得寫入 conversation log |
+| 卡片內容不是「可直接說給藥師」 | 現在只測 action type / guardian allow | Response card contract test：`en_text` 必須能獨立作為 utterance；禁止 meta instruction | 不含 meta verbs: ask/tell/let KK as instruction; 可含 `Could you please...` |
+| Visit summary 沒出現 | summary tests 是 service-level，不是 browser session end | Backend WebSocket integration + Playwright：點 `结束` / send `session.end` 後必須收到 `summary.render` 並切到 summary page | summary 包含 mentioned drugs、pharmacist-stated advice、unresolved questions |
+| Purchase/payment flow 未驗收 | E16/E17 沒覆蓋 checkout | New conversation_flow eval `purchase_checkout_flow` + browser test：parent 選買、藥師價格/付款、parent 確認、summary | 不生成醫療建議；purchase intent 被翻譯；payment instruction 被翻譯 |
+| Passive translation terminal state 不清楚 | no-card path 只看沒有 cards，沒看 UI state | Frontend UI test：small talk / help prompt passive route 後狀態回 `listening`，保留翻譯，不顯示 checking spinner/cards | UI 不停在 `KK 正在帮您确认` |
+| Product comparison table payload 不檢查 forbidden claims | 只檢查事件存在，不檢查每格 facts source | Eval payload validator：table fields 只能來自 pharmacist utterance spans；禁止 `best/safe/recommend/fewer side effects` | table cells 有 source span 或 exact substring provenance |
+
+### 必須新增 / 修改的測試檔案
+
+*   `frontend/src/features/conversation/reducer.test.ts`
+    *   刪除或反轉目前「`card.confirmed` 直接新增 `KK 代说` turn」的期待。
+    *   新增：card lifecycle 進 action trail，不進 conversation turns。
+*   `frontend/src/pages/ConversationPage.test.tsx`
+    *   新增：最新 final translation 在 route/cards/listening 後仍留在主工作區。
+    *   新增：user mode 不只是 hide thought text，也要確保 thought text 不會從 runtime fixtures 進 log。
+*   `frontend/src/features/conversation/runtime/BackendConversationRuntime.test.ts`
+    *   新增：typed fallback submission 不啟動/不維持 mic audio streaming。
+    *   新增：ticket failure 顯示 user-facing error path。
+*   `frontend/e2e/pharmacy-dialogue.spec.ts`
+    *   目前應拆成兩個：
+        *   mock smoke：只測 mock demo。
+        *   backend smoke：明確切 `真实后端 (Backend)`，驗證 WebSocket、typed fallback、main translation、no card pollution、summary。
+*   `backend/tests/unit/adapters/test_gemini_live_adapter.py`
+    *   新增：model text/thought part 不可 map 為 input transcript。
+    *   新增：audio inline_data 才能產生 `ProviderAudioEvent`。
+*   `backend/tests/integration/runtime/test_gemini_live_transport.py`
+    *   新增：confirmed speech 必須收到 provider audio 才能 completed；無 audio 要 fallback/failed，不可假 completed。
+    *   新增：client typed transcript speaker 不被 microphone speaker state 覆蓋。
+*   `backend/tests/unit/services/test_pharmacy_product_options.py`
+    *   新增自然語句 parser cases：`costs eight dollars and is for...`、`do not apply...`、`please check with me if...`。
+*   `backend/tests/integration/runtime/test_live_translation_flow.py`
+    *   新增真實 QA trace replay：用這次 report 的 transcript sequence 驗證 event/payload/UI contract。
+*   `evals/cases.json`
+    *   修改 E16 為自然藥師話術，或新增 E18 natural product options。
+    *   新增 E19 card grounding latest turn。
+    *   新增 E20 conversation log purity。
+    *   新增 E21 purchase checkout + summary。
+*   `evals/run.py`
+    *   `conversation_flow` evaluator 必須不只檢查 event type，還要檢查 payload facts、forbidden strings、card grounding、speaker sequence、summary fields。
+    *   新增 browser/trace-backed eval kind，至少能讀 Playwright JSON report 並驗證 binary frames、UI snapshots、conversation log purity。
+
+### Eval 改造計畫
+
+1.   **把 eval 分層**
+    *   Unit eval：router / guardian / card shape / product extractor。
+    *   Runtime eval：`LiveRuntimeService` event sequence + payload assertions。
+    *   Browser trace eval：真 UI + WebSocket frame + screenshots/body text assertions。
+    *   Optional live-provider eval：需要 key 時才跑，專門驗證 Gemini Live audio frame 和 provider text filtering。
+2.   **每個 P0 需要至少兩層測試**
+    *   例如 TTS：backend runtime fake provider audio test + browser WebSocket binary/audio playback test。
+    *   例如 conversation log purity：reducer unit test + browser screenshot/bodyText test。
+3.   **fixture 必須包含真實自然話術**
+    *   不再只用 template phrases。
+    *   每個產品 eval 至少包含一個自然句、多句合併、價格用 `costs` 而非 `price is`。
+4.   **eval 不只看事件種類，要看內容**
+    *   `cards.render` 不等於 pass。
+    *   要檢查 card 是否 grounded、是否 direct utterance、是否沒有第三人稱、是否沒有推薦/安全斷言。
+5.   **CI 必須有「實跑 QA trace replay」**
+    *   真 live run 可以手動/夜間跑，但 trace replay 必須進 CI。
+    *   每次發現 bug，先把 report 轉成 failing fixture，修完再更新 baseline。
+
+### Fail-First 優先順序
+
+1.   寫 failing tests 鎖住 `card.confirmed` 不可直接污染 conversation log。
+2.   寫 backend adapter/runtime tests 鎖住 thought/status text 不可進 transcript/cards。
+3.   寫 speaker override failing test：typed pharmacist transcript 不受 parent mic state 影響。
+4.   寫 product extractor natural wording failing test。
+5.   寫 browser backend smoke：main translation retained、product table visible、conversation log no fake KK turn。
+6.   寫 audio delivery test：confirmed speech 沒有 binary audio frame 就 fail。
+7.   寫 summary/session-end browser test。
+
+### Definition of Done 更新
+
+任何下一輪宣稱「Pharmacy Counter E2E ready」前，至少必須同時滿足：
+
+*   `backend/.venv/bin/pytest backend/tests` pass。
+*   `frontend npm test` pass。
+*   `evals/run.py evals/cases.json` pass，且 eval 包含上述新增 P0 cases。
+*   Playwright backend smoke pass，不能只跑 mock。
+*   Browser trace report 顯示：
+    *   `wsReceivedBinaryFrames > 0` for confirmed speech。
+    *   `productOptionsRendered >= 1` for three-option flow。
+    *   `summary.render >= 1` after session end。
+    *   no user-facing transcript / translation contains `**Analyzing`、`**Awaiting`、`Interpreting the User`。
+    *   conversation log contains no `KK 代说` unless audio delivery succeeded。

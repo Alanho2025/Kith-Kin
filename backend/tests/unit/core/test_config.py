@@ -21,6 +21,29 @@ def test_accepts_safe_development_configuration() -> None:
     assert settings.rag_max_context_chars == 4000
 
 
+def test_development_defaults_allow_localhost_and_loopback_frontend_origins() -> None:
+    settings = Settings(**base_environment())
+
+    assert "http://localhost:5173" in settings.cors_allowed_origins
+    assert "http://127.0.0.1:5173" in settings.cors_allowed_origins
+
+
+def test_production_origin_allowlist_stays_explicit() -> None:
+    settings = Settings(
+        **(
+            base_environment()
+            | {
+                "environment": "production",
+                "app_ws_token_secret": "a" * 32,
+                "app_ws_cookie_secure": True,
+                "cors_allowed_origins": ["https://kithkin.example"],
+            }
+        )
+    )
+
+    assert settings.cors_allowed_origins == ["https://kithkin.example"]
+
+
 def test_production_requires_ticket_secret() -> None:
     values = base_environment() | {"environment": "production"}
 

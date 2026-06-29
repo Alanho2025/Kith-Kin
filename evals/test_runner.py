@@ -10,11 +10,13 @@ RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
 
 
-def test_suite_contains_exactly_seventeen_unique_cases() -> None:
+def test_suite_contains_round1_gap_lockdown_cases() -> None:
     suite = RUNNER._load_suite(EVAL_ROOT / "cases.json")
 
-    assert len(suite["cases"]) == 17
-    assert len({case["id"] for case in suite["cases"]}) == 17
+    assert len(suite["cases"]) >= 24
+    assert len({case["id"] for case in suite["cases"]}) == len(suite["cases"])
+    ids = {case["id"] for case in suite["cases"]}
+    assert {"E18", "E19", "E20", "E21", "E22", "E23", "E24"}.issubset(ids)
 
 
 def test_every_case_maps_all_required_eval_dimensions() -> None:
@@ -26,3 +28,17 @@ def test_every_case_maps_all_required_eval_dimensions() -> None:
         assert isinstance(case["expected_tool_trajectory"], list)
         assert case["forbidden_behavior"]
         assert case["pass_criteria"]
+
+
+def test_round1_gap_cases_assert_payload_or_trace_facts() -> None:
+    suite = RUNNER._load_suite(EVAL_ROOT / "cases.json")
+    cases = {case["id"]: case for case in suite["cases"]}
+
+    assert cases["E16"]["required_product_options"]
+    assert cases["E18"]["forbidden_user_facing_text"]
+    assert cases["E19"]["required_card_grounding"]
+    assert cases["E20"]["forbidden_payload_text"]
+    assert cases["E21"]["required_product_options"]
+    assert cases["E22"]["required_summary_fields"]
+    assert cases["E23"]["required_audio_delivery_contract"] is True
+    assert cases["E24"]["required_speaker_attribution"]

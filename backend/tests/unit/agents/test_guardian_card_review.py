@@ -86,6 +86,8 @@ async def test_guardian_blocks_prompt_injection_in_card_text() -> None:
         "I should take ibuprofen.",
         "I have no allergies.",
         "Ask pharmacist to write down the drug name",
+        "The patient is currently taking Lisinopril. Could you please note this?",
+        "Let KK ask the pharmacist to write down the medicine name.",
     ],
 )
 async def test_guardian_blocks_pharmacy_cards_that_are_not_parent_confirmation_questions(
