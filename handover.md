@@ -43,17 +43,6 @@
     *   **問題**：`companion.md` 過於嚴格地禁止任何「陳述句（Statements）」，導致藥劑師詢問基礎問題時 AI 無法給出事實性的直接回答。
     *   **待決策**：是否允許 AI 結合已驗證的個人檔案提供事實性陳述（例如「我對青黴素過敏」）。若允許，仍必須維持確認式結構，不自行下醫療結論。
 
-### 2. Phase 09 (記憶、通知與召回) 原定計劃與實際代碼 Gap
-*   **服務模組未拆分**：原計劃建立獨立的 `visit_summary_service.py` 和 `notification_service.py`；當前代碼將總結編譯與執行邏輯全部合併在了 [visit_completion_service.py](file:///Users/heminghan/Kith-Kin/backend/app/services/visit_completion_service.py) 中。
-*   **適配器與 Schema 缺失**：原計劃建立獨立的通知 stub 適配器 `notification_adapter.py` 和 `notification.py` schema，目前由 [NotificationRepository](file:///Users/heminghan/Kith-Kin/backend/app/repositories/notification_repository.py) 的 `send_stub` 方法直接處理且相關 request/data schema 被放置於 [mcp.py](file:///Users/heminghan/Kith-Kin/backend/app/schemas/mcp.py) 中。
-*   **接口簽名差異**：如 `execute_confirmed_action` 接收的是 `StoredConfirmation` 而非 `ConsumedConfirmation`，且返回值為 `None` 而非 `ConfirmedVisitActionOutcome`。
-
-### 3. Phase 10 (安全、可觀測性與評估) 原定計劃與實際代碼 Gap
-*   **核心安全/保留服務缺失**：原定建立的 `trace_service.py`、`redaction_service.py`、`retention_service.py` 及 `logging.py` 均不存在。脫敏（Allowlisting）和脱敏後置（Redaction backstop）是直接耦合在 [trace_repository.py](file:///Users/heminghan/Kith-Kin/backend/app/repositories/trace_repository.py) 和 [rag_service.py](file:///Users/heminghan/Kith-Kin/backend/app/services/rag_service.py) 中的，且完全缺失定時清理過期數據的 retention worker 服務邏輯。
-*   **數據表保留屬性缺失**：目前資料庫中 [VisitSummary](file:///Users/heminghan/Kith-Kin/backend/app/db/models/visit_summary.py) 和 [TraceEvent](file:///Users/heminghan/Kith-Kin/backend/app/db/models/trace_event.py) 均沒有定義過期保留屬性列（如刪除時間戳），也未創建 `0004_retention_metadata.py` 遷移腳本。
-*   **自動化安全/保留測試缺失**：原計劃中驗證數據脱敏、追蹤白名單、密鑰掃描、保留策略和 Markdown 同步的 6 個測試文件均未建立。
-*   **評估模組未解耦**：原計劃解耦 `judges.py` 和 `trajectory.py`，目前所有 eval checks 全都耦合在 [evals/run.py](file:///Users/heminghan/Kith-Kin/evals/run.py) 中（儘管 15 個測試用例依然能在 mock fallback 模式下成功跑通）。
-
 ---
 
 ## 🧪 測試驗證報告
