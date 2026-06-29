@@ -1,4 +1,4 @@
-"""Run the 15 architecture-derived Kith&Kin evals against current public boundaries."""
+"""Run the 17 architecture-derived Kith&Kin evals against current public boundaries."""
 
 from __future__ import annotations
 
@@ -21,9 +21,13 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.adapters.gemini_text_adapter import GeminiTextAdapter  # noqa: E402
 from app.adapters.provider_schemas import (  # noqa: E402
+    ProviderLiveEventType,
+    ProviderTranscriptEvent,
     TranslationRequest,
     TranslationSegment,
 )
+from app.adapters.fake_live_adapter import FakeLiveAdapter  # noqa: E402
+from app.agents.card_proposal_materializer import approve_card_proposal  # noqa: E402
 from app.agents.companion_agent import CompanionAgent  # noqa: E402
 from app.agents.guardian_agent import GuardianAgent  # noqa: E402
 from app.agents.router_agent import RouterAgent  # noqa: E402
@@ -55,7 +59,8 @@ from app.services.confirmed_action_executor import (  # noqa: E402
     ConfirmedActionExecutor,
 )
 from app.services.translation_service import TranslationService  # noqa: E402
-from app.services.turn_orchestrator import TurnOrchestrator  # noqa: E402
+from app.services.turn_orchestrator import INTERACTION_DRUG_NAMES, TurnOrchestrator  # noqa: E402
+from app.services.live_runtime_service import LiveRuntimeService  # noqa: E402
 
 SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
 USER_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -133,6 +138,26 @@ class SlowTranslationGateway:
             target_language="zh_cn",
             translated_text="不应返回",
             latency_ms=50,
+        )
+
+
+class FlowTranslationGateway:
+    """Deterministic translation sidecar for product-level conversation flow evals."""
+
+    async def translate_final(self, request: TranslationRequest) -> TranslationSegment:
+        translated = request.text
+        if request.source_language == "zh":
+            translated = (
+                "Parent said they used an overseas cold medicine before and wants the "
+                "pharmacist to compare options by active ingredient and intended use."
+            )
+        return TranslationSegment(
+            source_transcript_event_id=request.source_event_id,
+            segment_id=f"seg_{request.utterance_id}",
+            source_language=request.source_language,
+            target_language="zh_cn",
+            translated_text=translated,
+            latency_ms=1,
         )
 
 
@@ -252,7 +277,92 @@ def _card_set(action_type: CardActionType) -> CardSet:
     )
 
 
+async def _eval_turn_deterministic(case: dict[str, Any]) -> dict[str, Any]:
+    cards = CardService(lambda: NOW)
+    recorder = RecordingMcpAdapter()
+    event = _transcript_event(case)
+    router = RouterAgent()
+    guardian_agent = GuardianAgent()
+    companion = CompanionAgent(lambda: NOW)
+
+    route = await router.route(event)
+    guardian = await guardian_agent.review_turn(event)
+    proposal = None
+    card_review = None
+    extra: list[dict[str, Any]] = []
+
+    route_value = str(_value(route.route_type))
+    guardian_value = str(_value(guardian.decision))
+    if guardian_value != "block" and route_value not in {
+        "passive_translation",
+        "privacy_risk",
+        "fallback",
+    }:
+        if route_value == "pharmacy_risk":
+            await recorder.memory_search("profile", ("profile",))
+            text_lower = event.payload.text.lower()
+            named_drugs = [name for name in INTERACTION_DRUG_NAMES if name in text_lower]
+            if named_drugs:
+                await recorder.check_drug_interaction(named_drugs[0], tuple(named_drugs[1:]))
+
+        proposal = await companion.propose_cards(
+            event,
+            route,
+            guardian.guardian_decision_id,
+            mcp_adapter=recorder,
+        )
+        card_review = await guardian_agent.review_cards(proposal.card_set)
+        if card_review.decision.value == "allow":
+            proposal = approve_card_proposal(proposal, card_review)
+            cards.register_card_set(proposal.card_set, _context())
+
+        gated = all(
+            card.requires_guardian_approval and card.requires_parent_confirmation
+            for card in proposal.card_set.cards
+        )
+        extra.append(
+            {
+                "name": "card_confirmation_gate",
+                "passed": gated,
+                "expected": True,
+                "observed": gated,
+            }
+        )
+        expected_card_type = case.get("expected_card_type")
+        if expected_card_type is not None:
+            observed_card_type = proposal.card_set.cards[0].card_type.value
+            acceptable = (
+                expected_card_type if isinstance(expected_card_type, list) else [expected_card_type]
+            )
+            extra.append(
+                {
+                    "name": "card_type",
+                    "passed": observed_card_type in acceptable,
+                    "expected": expected_card_type,
+                    "observed": observed_card_type,
+                }
+            )
+
+    normalised = {
+        "route": _normalise(route),
+        "guardian": _normalise(guardian),
+        "card_proposal": _normalise(proposal),
+        "card_review": _normalise(card_review),
+    }
+    observed = list(dict.fromkeys([*recorder.calls, *_collect_tools(normalised)]))
+    return {
+        "route": route_value,
+        "guardian": guardian_value,
+        "tools": observed,
+        "output": normalised,
+        "extra_checks": extra,
+    }
+
+
 async def _eval_turn(case: dict[str, Any]) -> dict[str, Any]:
+    if not os.environ.get("GOOGLE_API_KEY"):
+        return await _eval_turn_deterministic(case)
+
     cards = CardService(lambda: NOW)
     recorder = RecordingMcpAdapter()
     event = _transcript_event(case)
@@ -546,6 +656,71 @@ async def _eval_confirmed_action(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _eval_conversation_flow(case: dict[str, Any]) -> dict[str, Any]:
+    cards = CardService(lambda: NOW)
+    recorder = RecordingMcpAdapter()
+    orchestrator = TurnOrchestrator(
+        RouterAgent(),
+        GuardianAgent(),
+        CompanionAgent(lambda: NOW),
+        cards,
+    )
+    runtime = LiveRuntimeService(
+        cards,
+        FakeLiveAdapter(),
+        lambda: NOW,
+        translation_service=TranslationService(FlowTranslationGateway(), timeout_ms=1000),
+        turn_orchestrator=orchestrator,
+        user_id=USER_ID,
+    )
+
+    events: list[dict[str, object]] = []
+    flow = case["input"].get("flow") or [case["input"]]
+    original_google_key = os.environ.pop("GOOGLE_API_KEY", None)
+    try:
+        for index, item in enumerate(flow, start=1):
+            speaker = item["speaker"]
+            if speaker == "system":
+                speaker = "unknown"
+            provider_event = ProviderTranscriptEvent(
+                event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+                provider_event_id=f"provider_{case['id'].lower()}_{index}",
+                utterance_id=f"utt_{case['id'].lower()}_{index}",
+                speaker=cast(Any, speaker),
+                language=cast(Any, item["language"]),
+                text=str(item["text"]),
+                revision=1,
+            )
+            events.extend(await runtime.handle_provider_event(SESSION_ID, provider_event))
+    finally:
+        if original_google_key is not None:
+            os.environ["GOOGLE_API_KEY"] = original_google_key
+
+    observed_event_types = [str(event.get("event_type")) for event in events]
+    expected_flow_events = list(case.get("expected_flow_events", []))
+    missing_flow_events = [
+        event_type for event_type in expected_flow_events if event_type not in observed_event_types
+    ]
+    return {
+        "route": "not_applicable",
+        "guardian": "not_applicable",
+        "tools": [],
+        "output": {
+            "events": _normalise(events),
+            "observed_event_types": observed_event_types,
+            "recorded_safe_tool_calls": recorder.calls,
+        },
+        "extra_checks": [
+            {
+                "name": "flow_events",
+                "passed": not missing_flow_events,
+                "expected": expected_flow_events,
+                "observed": observed_event_types,
+            }
+        ],
+    }
+
+
 async def _eval_privacy_trace(case: dict[str, Any]) -> dict[str, Any]:
     result = await _eval_turn(case)
     result["output"] = {
@@ -564,6 +739,7 @@ EVALUATORS: dict[str, Evaluator] = {
     "audio_half_duplex": _eval_audio_half_duplex,
     "translation_timeout": _eval_translation_timeout,
     "confirmed_action": _eval_confirmed_action,
+    "conversation_flow": _eval_conversation_flow,
     "privacy_trace": _eval_privacy_trace,
 }
 
@@ -624,6 +800,22 @@ async def _run_case(
         )
 
     output_text = json.dumps(_normalise(observed["output"]), ensure_ascii=False).lower()
+    required_misses = [
+        marker for marker in case.get("required_behavior", []) if marker.lower() not in output_text
+    ]
+    if "required_behavior" in case:
+        checks.append(
+            {
+                "name": "required_behavior",
+                "passed": not required_misses,
+                "expected": list(case.get("required_behavior", [])),
+                "observed": [
+                    marker
+                    for marker in case.get("required_behavior", [])
+                    if marker.lower() in output_text
+                ],
+            }
+        )
     forbidden_hits = [
         marker for marker in case["forbidden_behavior"] if marker.lower() in output_text
     ]
@@ -659,8 +851,8 @@ async def _run_case(
 def _load_suite(path: Path) -> dict[str, Any]:
     suite = json.loads(path.read_text(encoding="utf-8"))
     cases = suite.get("cases")
-    if not isinstance(cases, list) or len(cases) != 15:
-        raise ValueError("EVAL_SUITE_REQUIRES_EXACTLY_15_CASES")
+    if not isinstance(cases, list) or len(cases) != 17:
+        raise ValueError("EVAL_SUITE_REQUIRES_EXACTLY_17_CASES")
     required = {
         "id",
         "kind",
@@ -722,7 +914,7 @@ async def _run_suite(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cases", type=Path, help="Path to the 15-case JSON suite")
+    parser.add_argument("cases", type=Path, help="Path to the 17-case JSON suite")
     parser.add_argument("--report", type=Path, help="Optional JSON baseline report path")
     parser.add_argument(
         "--require-live-companion",

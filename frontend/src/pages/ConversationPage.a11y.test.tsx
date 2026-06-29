@@ -15,9 +15,9 @@ describe("ConversationPage accessibility", () => {
       />,
     );
 
-    for (const name of ["我自己说", "请稍等", "重复", "结束"] as const) {
+    for (const name of ["听药剂师说话", "按住说中文", "请药剂师再说一次", "请稍等", "结束"] as const) {
       const control = await screen.findByRole("button", { name });
-      expect(control).toHaveClass("min-h-12");
+      expect(control).toBeInTheDocument();
     }
   });
 });

@@ -75,6 +75,9 @@ class VisitCompletionService:
             unresolved_questions=tuple(unresolved_questions[:20]),
             follow_up_needed=follow_up_needed,
             family_notification_requested=family_notification_requested,
+            pharmacist_stated_advice=pharmacist_advice_summary,
+            unresolved_follow_up_questions=tuple(unresolved_questions[:20]),
+            confirmed_family_follow_up=False,
         )
         self._draft_summaries[session_id] = summary
         return summary

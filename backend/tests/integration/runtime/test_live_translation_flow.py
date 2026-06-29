@@ -355,6 +355,46 @@ async def test_template_pharmacy_e2e_uses_real_backend_flow_without_mock_mode(
     assert "Panadol" not in summary_body["pharmacist_advice_summary_zh"]
 
 
+async def test_parent_speaker_mode_records_parent_transcript_without_card_generation() -> None:
+    gateway = CapturingTranslationGateway()
+    service = runtime(gateway, with_turn_orchestrator=True)
+    websocket = CapturingCommandWebSocket()
+    session_id = SESSION_ID
+
+    await service._handle_live_command(
+        websocket,
+        session_id,
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-speaker-parent",
+                "event_type": "audio.speaker_changed",
+                "session_id": str(session_id),
+                "sequence": 1,
+                "timestamp": NOW.isoformat(),
+                "correlation_id": None,
+                "payload": {"speaker": "parent"},
+            }
+        ),
+        AsyncMock(),
+    )
+
+    events = await service.handle_provider_event(
+        session_id,
+        provider_transcript_text(
+            "我想知道关于感冒药。",
+            utterance_id="utt-parent-zh",
+            speaker="pharmacist",
+            language="zh",
+        ),
+    )
+
+    transcript = next(event for event in events if event["event_type"] == "transcript.final")
+    assert transcript["payload"]["speaker"] == "parent"
+    assert "route.decision" not in [event["event_type"] for event in events]
+    assert "cards.render" not in [event["event_type"] for event in events]
+
+
 async def test_card_review_block_surfaces_fallback_without_rendering_cards() -> None:
     class BlockingCardReviewOrchestrator:
         async def process_final_turn(self, event, context, conversation_context=None):

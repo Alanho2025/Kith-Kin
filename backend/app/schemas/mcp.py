@@ -103,6 +103,9 @@ class VisitSummaryValue(BaseModel):
     unresolved_questions: Annotated[tuple[str, ...], Field(max_length=20)]
     follow_up_needed: bool
     family_notification_requested: bool
+    pharmacist_stated_advice: Annotated[str, Field(max_length=1000)] = ""
+    unresolved_follow_up_questions: Annotated[tuple[str, ...], Field(max_length=20)] = ()
+    confirmed_family_follow_up: bool = False
 
 
 class MemoryWriteRequest(BaseModel):

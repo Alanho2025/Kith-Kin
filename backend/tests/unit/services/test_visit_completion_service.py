@@ -89,3 +89,35 @@ async def test_summary_does_not_add_interaction_or_alternative_not_spoken_by_pha
     )
     assert "Panadol" not in summary.pharmacist_advice_summary
     assert "interaction" not in summary.pharmacist_advice_summary.lower()
+
+
+@pytest.mark.anyio
+async def test_summary_exposes_product_goal_partitions_without_rewriting_questions() -> None:
+    service = VisitCompletionService(
+        memory_repository=None,
+        notification_repository=None,
+        get_session_events=lambda _sid: [
+            transcript_event(
+                speaker="pharmacist",
+                text="Panadol is paracetamol. The price is 6 dollars.",
+                event_id="evt-pharmacist-panadol",
+            ),
+            transcript_event(
+                speaker="parent",
+                text="Could you confirm which one is closest to the medicine I used before?",
+                event_id="evt-parent-question",
+            ),
+        ],
+    )
+    context = TrustedRequestContext(session_id=SESSION_ID, user_id=USER_ID, origin="test")
+
+    summary = await service.prepare_summary(SESSION_ID, context)
+
+    assert summary.pharmacist_stated_advice == (
+        "Pharmacist said: Panadol is paracetamol. The price is 6 dollars."
+    )
+    assert summary.unresolved_follow_up_questions == (
+        "Could you confirm which one is closest to the medicine I used before?",
+    )
+    assert summary.confirmed_family_follow_up is False
+    assert "closest" not in summary.pharmacist_stated_advice.lower()

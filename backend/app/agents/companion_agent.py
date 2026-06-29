@@ -532,6 +532,86 @@ class CompanionAgent(Agent):
                         "action": {"type": "no_action"},
                     }
                 ]
+            elif (
+                "three options" in text_lower
+                and (
+                    "panadol" in text_lower
+                    or "nurofen" in text_lower
+                    or "store-brand" in text_lower
+                    or "store brand" in text_lower
+                )
+            ):
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请帮我说明这几个选择的成分、用途、用法和注意事项好吗？",
+                        "en_text": (
+                            "Could you please explain the active ingredient, intended use, "
+                            "directions, and cautions for each option?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请帮我确认哪一个（如果有）和我以前用的药在有效成分上最接近好吗？",
+                        "en_text": (
+                            "Could you please confirm which option, if any, is closest "
+                            "by active ingredient to the medicine I used before?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请帮我写下每个选择的药名、用法和提醒好吗？",
+                        "en_text": (
+                            "Could you please write down each option's name, directions, "
+                            "and warnings?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
+            elif (
+                "active ingredient" in text_lower
+                or "used before" in text_lower
+                or "in china" in text_lower
+                or "overseas" in text_lower
+                or "what symptoms it was for" in text_lower
+            ):
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请帮我根据有效成分确认有没有相近的选择好吗？",
+                        "en_text": (
+                            "Could you please confirm whether there is any close option "
+                            "by checking the active ingredient?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请帮我确认这种药原本是用于什么症状好吗？",
+                        "en_text": (
+                            "Could you please confirm the intended use or symptoms "
+                            "before comparing options?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    },
+                    {
+                        "card_type": "ask_to_write_down",
+                        "zh_text": "请帮我写下有效成分和药名好吗？",
+                        "en_text": (
+                            "Could you please write down the active ingredient and "
+                            "medicine name?"
+                        ),
+                        "risk_level": "normal",
+                        "action": {"type": "no_action"},
+                    }
+                ]
             elif "ibuprofen" in text_lower:
                 draft_cards = [
                     {

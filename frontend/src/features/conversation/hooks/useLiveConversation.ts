@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer } from "react";
 
 import { conversationReducer, initialConversationState } from "../reducer";
 import type { ConversationRuntime } from "../runtime/ConversationRuntime";
-import type { RuntimeCommandView } from "../viewModels";
+import type { MicrophoneModeView, RuntimeCommandView } from "../viewModels";
 
 
 export function useLiveConversation(runtime: ConversationRuntime, sessionId: string) {
@@ -27,9 +27,14 @@ export function useLiveConversation(runtime: ConversationRuntime, sessionId: str
     [runtime],
   );
 
+  const setMicrophoneMode = useCallback(
+    (mode: MicrophoneModeView) => runtime.setMicrophoneMode(mode),
+    [runtime],
+  );
+
   const dismissConfirmation = useCallback(() => {
     dispatch({ type: "dismiss_confirmation" });
   }, []);
 
-  return { state, sendCommand, setMicrophoneEnabled, dismissConfirmation };
+  return { state, sendCommand, setMicrophoneEnabled, setMicrophoneMode, dismissConfirmation };
 }

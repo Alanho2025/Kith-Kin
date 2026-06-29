@@ -69,6 +69,8 @@ interface RawProductOption {
   price?: string | null;
   pharmacist_stated_use?: string | null;
   pharmacistStatedUse?: string | null;
+  pharmacist_stated_directions?: string | null;
+  pharmacistStatedDirections?: string | null;
   pharmacist_stated_cautions?: string | null;
   pharmacistStatedCautions?: string | null;
 }
@@ -183,6 +185,8 @@ export function conversationReducer(
         price: option.price ?? null,
         pharmacistStatedUse:
           option.pharmacistStatedUse ?? option.pharmacist_stated_use ?? null,
+        pharmacistStatedDirections:
+          option.pharmacistStatedDirections ?? option.pharmacist_stated_directions ?? null,
         pharmacistStatedCautions:
           option.pharmacistStatedCautions ?? option.pharmacist_stated_cautions ?? null,
       }));

@@ -55,6 +55,7 @@ describe("conversationReducer", () => {
             name: "paracetamol",
             price: "6 dollars",
             pharmacistStatedUse: "usually used for pain or fever",
+            pharmacistStatedDirections: "two tablets every six hours if suitable",
             pharmacistStatedCautions: null,
           },
           {
@@ -69,6 +70,7 @@ describe("conversationReducer", () => {
 
     expect(state.productOptions).toHaveLength(2);
     expect(state.productOptions[0].name).toBe("paracetamol");
+    expect(state.productOptions[0].pharmacistStatedDirections).toContain("six hours");
     expect(state.productOptions[1].pharmacistStatedCautions).toContain("certain medicines");
   });
 });

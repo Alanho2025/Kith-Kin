@@ -51,6 +51,7 @@ export interface ProductOptionView {
   name: string;
   price: string | null;
   pharmacistStatedUse: string | null;
+  pharmacistStatedDirections: string | null;
   pharmacistStatedCautions: string | null;
 }
 
@@ -99,6 +100,8 @@ export interface ConversationState {
   activeUtteranceId: string | null;
 }
 
+export type MicrophoneModeView = "pharmacist" | "parent" | null;
+
 export interface ConversationRuntimeEvent {
   schemaVersion: string;
   eventId: string;
@@ -120,6 +123,10 @@ export type RuntimeCommandView =
   | { eventType: "control.self_speak"; payload: Record<string, never> }
   | { eventType: "control.please_wait"; payload: Record<string, never> }
   | { eventType: "control.repeat"; payload: { target: "last_translation" } }
+  | {
+      eventType: "audio.speaker_changed";
+      payload: { speaker: "parent" | "pharmacist" };
+    }
   | {
       eventType: "session.end";
       payload: { reason: "user_completed" | "user_cancelled" };

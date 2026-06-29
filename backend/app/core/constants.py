@@ -13,6 +13,7 @@ class RuntimeEventType(StrEnum):
     AUDIO_LISTENING = "audio.listening"
     AUDIO_MUTED = "audio.muted"
     AUDIO_SPEAKING = "audio.speaking"
+    AUDIO_SPEAKER_CHANGED = "audio.speaker_changed"
     TRANSCRIPT_PARTIAL = "transcript.partial"
     TRANSCRIPT_FINAL = "transcript.final"
     TRANSLATION_PENDING = "translation.pending"

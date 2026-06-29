@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ConversationRuntime } from "./ConversationRuntime";
 import type {
   ConversationRuntimeEvent,
+  MicrophoneModeView,
   RuntimeCommandView,
 } from "../viewModels";
 import { AudioPlayer } from "./AudioPlayer";
@@ -94,6 +95,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private backendMuted = false;
   private recorderStarted = false;
   private micMode: MicMode = "idle";
+  private activeSpeaker: Exclude<MicrophoneModeView, null> = "pharmacist";
 
   constructor(options: BackendConversationRuntimeOptions = {}) {
     this.fetchFn = options.fetchFn ?? window.fetch.bind(window);
@@ -149,15 +151,24 @@ export class BackendConversationRuntime implements ConversationRuntime {
     this.recorderStarted = false;
     this.userMicEnabled = false;
     this.micMode = "idle";
+    this.activeSpeaker = "pharmacist";
     return Promise.resolve();
   }
 
-  setMicrophoneEnabled(enabled: boolean): void {
-    this.userMicEnabled = enabled;
+  setMicrophoneMode(mode: MicrophoneModeView): void {
+    if (mode !== null) {
+      this.activeSpeaker = mode;
+      this.sendSpeakerChanged(mode);
+    }
+    this.userMicEnabled = mode !== null;
     if (this.micMode !== "system_speaking" && this.micMode !== "error") {
-      this.micMode = enabled ? "listening_to_pharmacist" : "paused";
+      this.micMode = mode === "parent" ? "user_speaking" : mode === "pharmacist" ? "listening_to_pharmacist" : "paused";
     }
     this.updateRecorderGate();
+  }
+
+  setMicrophoneEnabled(enabled: boolean): void {
+    this.setMicrophoneMode(enabled ? "pharmacist" : null);
   }
 
   sendCommand(command: RuntimeCommandView): Promise<void> {
@@ -213,7 +224,11 @@ export class BackendConversationRuntime implements ConversationRuntime {
         this.audioRecorder?.pause();
       } else {
         this.backendMuted = false;
-        this.micMode = this.userMicEnabled ? "listening_to_pharmacist" : "paused";
+        this.micMode = this.userMicEnabled
+          ? this.activeSpeaker === "parent"
+            ? "user_speaking"
+            : "listening_to_pharmacist"
+          : "paused";
         this.updateRecorderGate();
       }
     }
@@ -269,5 +284,10 @@ export class BackendConversationRuntime implements ConversationRuntime {
         this.micMode !== "system_speaking" &&
         this.micMode !== "error",
     };
+  }
+
+  private sendSpeakerChanged(speaker: Exclude<MicrophoneModeView, null>): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    this.sendCommand({ eventType: "audio.speaker_changed", payload: { speaker } });
   }
 }

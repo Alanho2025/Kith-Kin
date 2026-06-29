@@ -2,8 +2,9 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import WebSocket
@@ -22,6 +23,7 @@ from app.adapters.provider_schemas import (
 from app.core.constants import SCHEMA_VERSION, CardActionType, GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import (
+    AudioSpeakerChangedEvent,
     CardConfirmEvent,
     TranscriptFinalEvent,
     parse_runtime_event,
@@ -89,6 +91,7 @@ class LiveRuntimeService:
         self._speech_sessions: set[UUID] = set()
         self._paused_sessions: set[UUID] = set()
         self._last_spoken_text: dict[UUID, str] = {}
+        self._speaker_sessions: dict[UUID, Literal["parent", "pharmacist"]] = {}
         self._product_options = PharmacyProductOptionTracker()
 
     def discard_session(self, session_id: UUID) -> None:
@@ -96,6 +99,7 @@ class LiveRuntimeService:
         self._speech_sessions.discard(session_id)
         self._paused_sessions.discard(session_id)
         self._last_spoken_text.pop(session_id, None)
+        self._speaker_sessions.pop(session_id, None)
         self._product_options.discard_session(str(session_id))
 
     async def serve(
@@ -208,6 +212,9 @@ class LiveRuntimeService:
             event = parse_runtime_event(json.loads(text))
         except (ValueError, json.JSONDecodeError):
             return
+        if isinstance(event, AudioSpeakerChangedEvent):
+            self._speaker_sessions[session_id] = event.payload.speaker
+            return
         if isinstance(event, TranscriptFinalEvent):
             from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
 
@@ -237,7 +244,7 @@ class LiveRuntimeService:
             if isinstance(event, PleaseWaitEvent):
                 self._paused_sessions.add(session_id)
             elif isinstance(event, SelfSpeakEvent):
-                self._paused_sessions.discard(session_id)
+                self._paused_sessions.add(session_id)
             elif isinstance(event, RepeatEvent):
                 self._paused_sessions.discard(session_id)
 
@@ -275,6 +282,11 @@ class LiveRuntimeService:
                             "pharmacist_advice_summary_zh": advice_zh,
                             "unresolved_questions_zh": questions_zh,
                             "follow_up_needed": summary_review.follow_up_needed,
+                            "pharmacist_stated_advice_zh": advice_zh,
+                            "unresolved_follow_up_questions_zh": questions_zh,
+                            "confirmed_family_follow_up": (
+                                summary_review.confirmed_family_follow_up
+                            ),
                         },
                         "card_set_id": f"cards-summary-{uuid4()}",
                     }
@@ -315,6 +327,10 @@ class LiveRuntimeService:
         session_id: UUID,
         provider_event: ProviderTranscriptEvent,
     ) -> tuple[dict[str, object], ...]:
+        active_speaker = self._speaker_sessions.get(session_id)
+        if active_speaker is not None and provider_event.utterance_id != "turn_complete":
+            provider_event = replace(provider_event, speaker=active_speaker)
+
         # Filter out self-echoes of Kith & Kin's TTS spoken English
         last_spoken = self._last_spoken_text.get(session_id)
         if last_spoken and provider_event.text:
@@ -621,6 +637,7 @@ class LiveRuntimeService:
             session_id=session_id,
             user_id=self._user_id or UUID("00000000-0000-4000-8000-000000000001"),
             system_instruction=system_instruction,
+            current_speaker=lambda: self._speaker_sessions.get(session_id, "pharmacist"),
         )
 
         if not self._live_gateway:
@@ -843,6 +860,10 @@ class LiveRuntimeService:
         except (ValueError, json.JSONDecodeError):
             return
 
+        if isinstance(event, AudioSpeakerChangedEvent):
+            self._speaker_sessions[session_id] = event.payload.speaker
+            return
+
         if isinstance(event, TranscriptFinalEvent):
             provider_event = ProviderTranscriptEvent(
                 event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
@@ -871,7 +892,7 @@ class LiveRuntimeService:
             if isinstance(event, PleaseWaitEvent):
                 self._paused_sessions.add(session_id)
             elif isinstance(event, SelfSpeakEvent):
-                self._paused_sessions.discard(session_id)
+                self._paused_sessions.add(session_id)
             elif isinstance(event, RepeatEvent):
                 self._paused_sessions.discard(session_id)
                 repeat_text = "Could you please say that again?"
@@ -926,6 +947,11 @@ class LiveRuntimeService:
                             "pharmacist_advice_summary_zh": advice_zh,
                             "unresolved_questions_zh": questions_zh,
                             "follow_up_needed": summary_review.follow_up_needed,
+                            "pharmacist_stated_advice_zh": advice_zh,
+                            "unresolved_follow_up_questions_zh": questions_zh,
+                            "confirmed_family_follow_up": (
+                                summary_review.confirmed_family_follow_up
+                            ),
                         },
                         "card_set_id": f"cards-summary-{uuid4()}",
                     }

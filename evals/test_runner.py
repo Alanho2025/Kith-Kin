@@ -10,11 +10,11 @@ RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
 
 
-def test_suite_contains_exactly_fifteen_unique_cases() -> None:
+def test_suite_contains_exactly_seventeen_unique_cases() -> None:
     suite = RUNNER._load_suite(EVAL_ROOT / "cases.json")
 
-    assert len(suite["cases"]) == 15
-    assert len({case["id"] for case in suite["cases"]}) == 15
+    assert len(suite["cases"]) == 17
+    assert len({case["id"] for case in suite["cases"]}) == 17
 
 
 def test_every_case_maps_all_required_eval_dimensions() -> None:

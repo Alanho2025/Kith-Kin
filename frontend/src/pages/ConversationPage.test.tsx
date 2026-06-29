@@ -14,8 +14,55 @@ describe("ConversationPage", () => {
 
     expect(await screen.findByRole("button", { name: "听药剂师说话" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "按住说中文" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "我自己说" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重复" })).not.toBeInTheDocument();
     expect(screen.getAllByRole("complementary", { name: "对话记录" })[0]).toBeInTheDocument();
     expect(screen.getByText("听懂药剂师，再安全回应")).toBeInTheDocument();
+  });
+
+  it("please wait pauses the recorder until a top voice control resumes it", async () => {
+    const runtime = new MockConversationRuntime([]);
+    render(<ConversationPage runtime={runtime} sessionId="ses-wait" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "听药剂师说话" }));
+    expect(runtime.microphoneMode).toBe("pharmacist");
+
+    fireEvent.click(screen.getByRole("button", { name: "请稍等" }));
+    expect(runtime.microphoneMode).toBeNull();
+    expect(runtime.commands).toContainEqual({
+      eventType: "control.please_wait",
+      payload: {},
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "听药剂师说话" }));
+    expect(runtime.microphoneMode).toBe("pharmacist");
+  });
+
+  it("records parent Chinese speech as elder speech, not medical staff", async () => {
+    const runtime = new MockConversationRuntime([
+      {
+        schemaVersion: "0.1",
+        eventId: "evt-parent-zh",
+        eventType: "transcript.final",
+        sessionId: "ses-parent",
+        sequence: 1,
+        timestamp: "2026-06-22T00:00:00Z",
+        correlationId: null,
+        payload: {
+          utteranceId: "utt-parent-zh",
+          speaker: "parent",
+          language: "zh",
+          text: "我想知道关于感冒药。",
+          revision: 1,
+        },
+      },
+    ]);
+
+    render(<ConversationPage runtime={runtime} sessionId="ses-parent" />);
+
+    expect(await screen.findAllByText("老人原话")).not.toHaveLength(0);
+    expect(screen.getAllByText("我想知道关于感冒药。")).not.toHaveLength(0);
+    expect(screen.queryByText("医护人员")).not.toBeInTheDocument();
   });
 
   it("fallback keeps english", async () => {
@@ -203,6 +250,7 @@ describe("ConversationPage", () => {
               name: "paracetamol",
               price: "6 dollars",
               pharmacistStatedUse: "usually used for pain or fever",
+              pharmacistStatedDirections: "two tablets every six hours if suitable",
               pharmacistStatedCautions: null,
             },
             {
@@ -223,6 +271,7 @@ describe("ConversationPage", () => {
     expect(screen.getByText("paracetamol")).toBeInTheDocument();
     expect(screen.getByText("6 dollars")).toBeInTheDocument();
     expect(screen.getByText("usually used for pain or fever")).toBeInTheDocument();
+    expect(screen.getByText("two tablets every six hours if suitable")).toBeInTheDocument();
     expect(screen.queryByText(/best option/i)).not.toBeInTheDocument();
   });
 

@@ -2,6 +2,7 @@ import type { ConversationRuntime } from "./ConversationRuntime";
 import type {
   CardSetView,
   ConversationRuntimeEvent,
+  MicrophoneModeView,
   RuntimeCommandView,
 } from "../viewModels";
 
@@ -17,6 +18,7 @@ function isCardSetPayload(value: unknown): value is { cardSet: CardSetView } {
 export class MockConversationRuntime implements ConversationRuntime {
   readonly commands: RuntimeCommandView[] = [];
   microphoneEnabled = false;
+  microphoneMode: MicrophoneModeView = null;
   private readonly listeners = new Set<(event: ConversationRuntimeEvent) => void>();
   private readonly cardSet: CardSetView | null;
   private sessionId = "mock-session";
@@ -55,7 +57,12 @@ export class MockConversationRuntime implements ConversationRuntime {
   }
 
   setMicrophoneEnabled(enabled: boolean): void {
-    this.microphoneEnabled = enabled;
+    this.setMicrophoneMode(enabled ? "pharmacist" : null);
+  }
+
+  setMicrophoneMode(mode: MicrophoneModeView): void {
+    this.microphoneMode = mode;
+    this.microphoneEnabled = mode !== null;
   }
 
   async sendCommand(command: RuntimeCommandView): Promise<void> {

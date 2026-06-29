@@ -67,3 +67,57 @@ async def test_no_key_companion_fallback_proposes_guardian_safe_cards(
     assert decision.decision is GuardianDecisionType.ALLOW
     assert all("Ask pharmacist" not in card.en_text for card in proposal.card_set.cards)
     assert all("Should I take" not in card.en_text for card in proposal.card_set.cards)
+
+
+@pytest.mark.anyio
+async def test_no_key_companion_fallback_handles_three_options_neutrally(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    companion = CompanionAgent(lambda: NOW)
+    guardian = GuardianAgent()
+
+    proposal = await companion.propose_cards(
+        event(
+            "For your headache I have three options: Panadol which is paracetamol, "
+            "Nurofen which is ibuprofen, and a cheaper store-brand paracetamol."
+        ),
+        route(),
+        guardian_decision_id="guardian-pending",
+        mcp_adapter=None,
+    )
+    joined = " ".join(card.en_text for card in proposal.card_set.cards).lower()
+    decision = await guardian.review_cards(proposal.card_set)
+
+    assert decision.decision is GuardianDecisionType.ALLOW
+    assert "active ingredient" in joined
+    assert "intended use" in joined
+    assert "directions" in joined
+    assert "best option" not in joined
+    assert "safer" not in joined
+    assert "recommend" not in joined
+
+
+@pytest.mark.anyio
+async def test_no_key_companion_fallback_asks_for_overseas_medicine_facts_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    companion = CompanionAgent(lambda: NOW)
+    guardian = GuardianAgent()
+
+    proposal = await companion.propose_cards(
+        event("Do you know the active ingredient or what symptoms it was for?"),
+        route(),
+        guardian_decision_id="guardian-pending",
+        mcp_adapter=None,
+    )
+    joined = " ".join(card.en_text for card in proposal.card_set.cards).lower()
+    decision = await guardian.review_cards(proposal.card_set)
+
+    assert decision.decision is GuardianDecisionType.ALLOW
+    assert "active ingredient" in joined
+    assert "intended use" in joined
+    assert "same medicine" not in joined
+    assert "equivalent" not in joined
+    assert "overseas version" not in joined

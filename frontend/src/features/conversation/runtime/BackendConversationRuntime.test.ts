@@ -235,4 +235,46 @@ describe("BackendConversationRuntime", () => {
     pauseSpy.mockRestore();
     resumeSpy.mockRestore();
   });
+
+  it("announces parent speaker mode before sending parent microphone audio", async () => {
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
+    vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-1", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-1");
+    await Promise.resolve();
+    socket.emitOpen();
+    await connected;
+
+    runtime.setMicrophoneMode("parent");
+    const pcm = new ArrayBuffer(8);
+    sendAudio(pcm);
+
+    expect(startRecorderSpy).toHaveBeenCalled();
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      event_type: "audio.speaker_changed",
+      payload: { speaker: "parent" },
+    });
+    expect(socket.sentBinary).toEqual([pcm]);
+
+    startRecorderSpy.mockRestore();
+  });
 });

@@ -3,7 +3,7 @@
 import asyncio
 import base64
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Literal, cast
 from uuid import uuid4
 
@@ -27,9 +27,15 @@ logger = logging.getLogger(__name__)
 class GeminiLiveSessionPort(LiveSessionPort):
     """An open session port communicating with Gemini Live API over WebSockets."""
 
-    def __init__(self, ctx: Any, session: Any) -> None:
+    def __init__(
+        self,
+        ctx: Any,
+        session: Any,
+        current_speaker: Callable[[], Literal["parent", "pharmacist", "unknown"]] | None = None,
+    ) -> None:
         self._ctx = ctx
         self._session = session
+        self._current_speaker = current_speaker
         self._queue: asyncio.Queue[ProviderLiveEvent | None] = asyncio.Queue()
         self._closed = False
         self._current_utterance_id = f"utt_{uuid4()}"
@@ -117,7 +123,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
             "type": "input_transcription",
             "event_id": f"evt_{uuid4()}",
             "utterance_id": self._current_utterance_id,
-            "speaker": "pharmacist",
+            "speaker": self._input_speaker(),
             "language": "en",
             "text": self._current_transcript_text,
             "revision": self._revision,
@@ -170,7 +176,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
         if msg.server_content:
             content = msg.server_content
 
-            # English input transcript (pharmacist speaking)
+            # English input transcript for whichever speaker the runtime selected.
             if content.input_transcription:
                 text = content.input_transcription.text or ""
                 finished = bool(content.input_transcription.finished)
@@ -180,7 +186,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
                     "utterance_id": self._current_utterance_id,
-                    "speaker": "pharmacist",
+                    "speaker": self._input_speaker(),
                     "language": "en",
                     "text": accumulated_text,
                     "revision": self._revision,
@@ -232,7 +238,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
                     "utterance_id": "turn_complete",
-                    "speaker": "pharmacist",
+                    "speaker": self._input_speaker(),
                     "language": "en",
                     "text": "",
                     "revision": 1,
@@ -240,6 +246,15 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 }
                 turn_complete_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                 await self._queue.put(turn_complete_event)
+
+    def _input_speaker(self) -> Literal["parent", "pharmacist", "unknown"]:
+        if self._current_speaker is None:
+            return "pharmacist"
+        try:
+            return _speaker(self._current_speaker())
+        except Exception:
+            logger.warning("Current speaker provider failed", exc_info=True)
+            return "unknown"
 
 
 class GeminiLiveAdapter(GeminiLiveGateway):
@@ -284,7 +299,7 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             ctx = client.aio.live.connect(model=model_name, config=config)
             session = await ctx.__aenter__()
 
-            return GeminiLiveSessionPort(ctx, session)
+            return GeminiLiveSessionPort(ctx, session, context.current_speaker)
         except Exception as e:
             logger.exception("Failed to connect to Gemini Live session")
             raise ProviderUnavailableError(f"LIVE_UNAVAILABLE: {e}") from e

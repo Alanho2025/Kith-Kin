@@ -9,6 +9,7 @@ import { useLiveConversation } from "../features/conversation/hooks/useLiveConve
 import type { ConversationRuntime } from "../features/conversation/runtime/ConversationRuntime";
 import type {
   ConversationTurnView,
+  MicrophoneModeView,
   ProductOptionView,
   RuntimeCommandView,
 } from "../features/conversation/viewModels";
@@ -22,7 +23,7 @@ export interface ConversationPageProps {
   onRestart?: () => void;
 }
 
-type ActiveMicMode = "pharmacist" | "parent" | null;
+type ActiveMicMode = MicrophoneModeView;
 
 const CARD_INTENT_LABELS = ["确认理解", "问清楚", "请慢一点"];
 
@@ -109,6 +110,7 @@ function ProductOptionsTable({ options }: { options: readonly ProductOptionView[
             <tr>
               <th scope="col" className="px-4 py-3">产品</th>
               <th scope="col" className="px-4 py-3">药师说的用途</th>
+              <th scope="col" className="px-4 py-3">药师说的用法</th>
               <th scope="col" className="px-4 py-3">药师说的注意事项</th>
               <th scope="col" className="px-4 py-3">价格</th>
             </tr>
@@ -119,6 +121,9 @@ function ProductOptionsTable({ options }: { options: readonly ProductOptionView[
                 <td className="px-4 py-3 font-bold text-navy">{option.name}</td>
                 <td className="px-4 py-3 text-slate-700">
                   {option.pharmacistStatedUse || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedDirections || "药师还没有说明"}
                 </td>
                 <td className="px-4 py-3 text-slate-700">
                   {option.pharmacistStatedCautions || "药师还没有说明"}
@@ -145,7 +150,7 @@ export function ConversationPage({
   sessionId,
   onRestart,
 }: ConversationPageProps) {
-  const { state, sendCommand, setMicrophoneEnabled, dismissConfirmation } = useLiveConversation(runtime, sessionId);
+  const { state, sendCommand, setMicrophoneMode: setRuntimeMicrophoneMode, dismissConfirmation } = useLiveConversation(runtime, sessionId);
   const [inputText, setInputText] = useState("");
   const [activeMicMode, setActiveMicMode] = useState<ActiveMicMode>(null);
   const [devMode, setDevMode] = useState(false);
@@ -190,25 +195,31 @@ export function ConversationPage({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        setMicrophoneEnabled(activeMicMode !== null);
+        setRuntimeMicrophoneMode(activeMicMode);
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [activeMicMode, setMicrophoneEnabled]);
+  }, [activeMicMode, setRuntimeMicrophoneMode]);
 
   const dispatchControl = (command: RuntimeCommandView) => {
+    if (command.eventType === "control.please_wait" || command.eventType === "session.end") {
+      setActiveMicMode(null);
+      setRuntimeMicrophoneMode(null);
+    }
     void sendCommand(command);
   };
   const selfSpeak = () => {
+    setActiveMicMode(null);
+    setRuntimeMicrophoneMode(null);
     dismissConfirmation();
     void sendCommand({ eventType: "control.self_speak", payload: {} });
   };
   const setMicrophoneMode = (mode: ActiveMicMode) => {
     setActiveMicMode(mode);
-    setMicrophoneEnabled(mode !== null);
+    setRuntimeMicrophoneMode(mode);
   };
   const togglePharmacistMic = () => {
     setMicrophoneMode(activeMicMode === "pharmacist" ? null : "pharmacist");

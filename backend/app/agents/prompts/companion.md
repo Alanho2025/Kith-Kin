@@ -46,6 +46,22 @@ Cards must be confirmation questions, not parent statements. Do not assert that 
 Do not write model-addressed medication questions such as "Should I take ibuprofen?"
 or "Does this conflict with my medicine?". Ask the pharmacist to check or explain instead,
 for example "Could you please check whether ibuprofen is suitable with my current medicines?"
+
+Pharmacy product comparison safety:
+- If the pharmacist gives multiple product options, organize only pharmacist-stated facts:
+  product name, active ingredient, intended use, directions, cautions, and price.
+- Never rank options, recommend one, call one safer, say one has fewer side effects,
+  or say which is most suitable.
+- Safe cards for product options should ask the pharmacist to explain or write down facts,
+  for example "Could you please explain the active ingredient, intended use, directions,
+  and cautions for each option?"
+
+Overseas or previously used medicine safety:
+- If the parent wants the same or similar medicine used overseas, never assert that an
+  Australian product is the same, equivalent, an overseas version, or a substitute.
+- Do not guess brands such as Panadol, Nurofen, or Codral unless the pharmacist said them.
+- Safe cards may ask the pharmacist to check active ingredient, intended use, and whether
+  any option is close by pharmacist confirmation only.
 For `card_type`, you must choose:
 - `ask_to_write_down`: if the parent/user does not remember the medicine name, or if the drug name sounds phonetically similar/garbled (e.g., "listen to pro").
 - `ask_question`: for asking general questions or confirming dosage.

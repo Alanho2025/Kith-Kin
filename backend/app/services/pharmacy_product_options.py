@@ -63,6 +63,7 @@ def _empty_option(name: str) -> dict[str, str | None]:
         "name": name,
         "price": None,
         "pharmacist_stated_use": None,
+        "pharmacist_stated_directions": None,
         "pharmacist_stated_cautions": None,
     }
 
@@ -71,6 +72,26 @@ def _parse_three_option_names(text: str) -> list[str]:
     lowered = text.lower()
     if "three options" not in lowered:
         return []
+
+    colon_match = re.search(r"three options:\s*(.+?)(?:\.|$)", text, flags=re.IGNORECASE)
+    if colon_match:
+        segment = colon_match.group(1)
+        segment = re.sub(r"\band\s+a\s+cheaper\s+", "and ", segment, flags=re.IGNORECASE)
+        parts = [part.strip(" ,") for part in re.split(r",\s*|\s+and\s+", segment)]
+        names: list[str] = []
+        for part in parts:
+            clean = re.sub(
+                r"^(?:and\s+)?(?:(?:a|an|the)\s+)?(?:cheaper\s+)?",
+                "",
+                part,
+                flags=re.IGNORECASE,
+            )
+            clean = re.split(r"\s+which\s+is\s+", clean, flags=re.IGNORECASE)[0]
+            name = clean.strip(" ,.")
+            if name:
+                names.append(name)
+        return names[:3] if len(names) >= 3 else []
+
     matches = re.findall(r"(?:this one is|and this one is)\s+(?:a\s+|an\s+)?([^,.]+)", lowered)
     names = [match.strip() for match in matches]
     return names[:3] if len(names) >= 3 else []
@@ -83,19 +104,41 @@ def _apply_detail_sentences(options: list[dict[str, str | None]], text: str) -> 
         lowered = sentence.lower()
         for option in options:
             name = str(option["name"])
-            prefix = f"{name} is "
-            article_prefix = f"the {name} "
+            name_lower = name.lower()
+            prefix = f"{name_lower} is "
+            directions_prefix = f"{name_lower} directions are "
+            article_prefix = f"the {name_lower} "
+            inline_use = re.search(
+                rf"\b{re.escape(name)}\s+which\s+is\s+([^,.;]+)",
+                sentence,
+                flags=re.IGNORECASE,
+            )
+            if inline_use:
+                detail = inline_use.group(1).strip(" .")
+                if detail and option["pharmacist_stated_use"] != detail:
+                    option["pharmacist_stated_use"] = detail
+                    changed = True
             if lowered.startswith(prefix):
                 detail = sentence[len(prefix):].strip(" .")
                 if detail and option["pharmacist_stated_use"] != detail:
                     option["pharmacist_stated_use"] = detail
                     changed = True
+            elif lowered.startswith(directions_prefix):
+                detail = sentence[len(directions_prefix):].strip(" .")
+                if detail and option["pharmacist_stated_directions"] != detail:
+                    option["pharmacist_stated_directions"] = detail
+                    changed = True
             elif lowered.startswith(article_prefix):
                 detail = sentence[len(article_prefix):].strip(" .")
-                if detail and option["pharmacist_stated_cautions"] != detail:
+                if re.match(r"price\s+is\s+\d+(?:\.\d{1,2})?\s+dollars\b", detail.lower()):
+                    price = detail.split("is", maxsplit=1)[1].strip(" .")
+                    if price and option["price"] != price:
+                        option["price"] = price
+                        changed = True
+                elif detail and option["pharmacist_stated_cautions"] != detail:
                     option["pharmacist_stated_cautions"] = detail
                     changed = True
-            elif lowered.startswith(f"{name} may "):
+            elif lowered.startswith(f"{name_lower} may "):
                 detail = sentence[len(name) + 1:].strip(" .")
                 if detail and option["pharmacist_stated_cautions"] != detail:
                     option["pharmacist_stated_cautions"] = detail

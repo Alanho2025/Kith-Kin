@@ -11,6 +11,7 @@ from sqlalchemy import delete
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{(BACKEND / 'kithkin.db').as_posix()}"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
@@ -172,8 +173,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--database-url",
-        default="sqlite+aiosqlite:///backend/kithkin_test.db",
-        help="Async SQLAlchemy SQLite URL to seed.",
+        default=DEFAULT_DATABASE_URL,
+        help="Async SQLAlchemy SQLite URL to seed. Defaults to backend/kithkin.db.",
     )
     parser.add_argument("--cleanup", action="store_true", help="Remove deterministic demo rows.")
     return parser.parse_args()

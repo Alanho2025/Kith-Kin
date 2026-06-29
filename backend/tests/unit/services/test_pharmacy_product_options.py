@@ -55,3 +55,45 @@ def test_tracker_ignores_unrelated_small_talk() -> None:
     tracker = PharmacyProductOptionTracker()
 
     assert tracker.update("session-template-2", "Hi, good morning. How are you today?") is None
+
+
+def test_tracker_builds_neutral_options_from_e16_pharmacist_options() -> None:
+    tracker = PharmacyProductOptionTracker()
+    session_id = "session-e16-options"
+
+    first = tracker.update(
+        session_id,
+        (
+            "For your headache I have three options: Panadol which is paracetamol, "
+            "Nurofen which is ibuprofen, and a cheaper store-brand paracetamol."
+        ),
+    )
+
+    assert first is not None
+    assert [option["name"] for option in first["options"]] == [
+        "Panadol",
+        "Nurofen",
+        "store-brand paracetamol",
+    ]
+    assert first["options"][0]["pharmacist_stated_use"] == "paracetamol"
+    assert first["options"][1]["pharmacist_stated_use"] == "ibuprofen"
+    assert first["options"][2]["pharmacist_stated_use"] is None
+    assert "best" not in str(first).lower()
+    assert "safer" not in str(first).lower()
+    assert "recommend" not in str(first).lower()
+
+    second = tracker.update(
+        session_id,
+        (
+            "Panadol directions are two tablets every six hours if suitable. "
+            "Nurofen may irritate the stomach. "
+            "The store-brand paracetamol price is 5 dollars."
+        ),
+    )
+
+    assert second is not None
+    assert second["options"][0]["pharmacist_stated_directions"] == (
+        "two tablets every six hours if suitable"
+    )
+    assert second["options"][1]["pharmacist_stated_cautions"] == "may irritate the stomach"
+    assert second["options"][2]["price"] == "5 dollars"

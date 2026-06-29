@@ -42,6 +42,13 @@ def test_parses_known_transcript_final_event() -> None:
     assert event.model_dump(mode="json")["event_type"] == "transcript.final"
 
 
+def test_parses_audio_speaker_changed_event() -> None:
+    event = parse_runtime_event(envelope("audio.speaker_changed", {"speaker": "parent"}))
+
+    assert event.__class__.__name__ == "AudioSpeakerChangedEvent"
+    assert event.model_dump(mode="json")["payload"]["speaker"] == "parent"
+
+
 def test_rejects_invalid_known_event_payload() -> None:
     with pytest.raises(ValidationError):
         parse_runtime_event(envelope("transcript.final", {"text": "missing fields"}))

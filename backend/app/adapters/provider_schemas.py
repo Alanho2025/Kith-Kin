@@ -1,6 +1,6 @@
 """Provider-normalised Live and translation schemas."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Protocol
@@ -24,6 +24,7 @@ class LiveSessionContext:
     session_id: UUID
     user_id: UUID
     system_instruction: str
+    current_speaker: Callable[[], Literal["parent", "pharmacist", "unknown"]] | None = None
 
 
 @dataclass(frozen=True)

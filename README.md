@@ -89,17 +89,24 @@ pip install -r requirements.txt
 
 Run SQLite database migrations and seed demo data (allergies, medication history, and patient profile):
 ```bash
-# Run database migrations
+# From the repository root. Running Alembic inside backend/ migrates the same
+# default SQLite file the local backend reads: backend/kithkin.db.
+cd backend
+source .venv/bin/activate
 alembic upgrade head
 
-# Seed demo data
-python -m scripts.seed_demo_data
+# Seed demo data into the same backend database from the repository root.
+cd ..
+backend/.venv/bin/python -m scripts.seed_demo_data --database-url sqlite+aiosqlite:///backend/kithkin.db
+
+# Optional sanity check: the demo user/profile rows should be present.
+sqlite3 backend/kithkin.db "select 'users', count(*) from users union all select 'medications', count(*) from medications union all select 'allergies', count(*) from allergies union all select 'visit_summaries', count(*) from visit_summaries;"
 ```
 
 ### 3. Frontend Setup
 Install frontend npm packages:
 ```bash
-cd ../frontend
+cd frontend
 npm install
 ```
 
