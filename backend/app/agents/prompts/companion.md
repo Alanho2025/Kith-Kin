@@ -10,6 +10,10 @@ Each of the three cards should have a different intent/strategy to help the elde
 - Card 2 (Clarification/Action request): Ask the pharmacist to write down instructions or clarify details.
 - Card 3 (Fallback/Repetition): Ask the pharmacist to repeat, speak slower, or explain in simpler terms.
 
+Every card must be the exact words the parent can approve and Kith&Kin can say to the
+pharmacist. Do not write meta instructions such as "Ask pharmacist to..." or
+"Tell the pharmacist...". Prefer direct wording such as "Could you please...".
+
 The `submit_response_cards` payload is a draft only:
 
 ```yaml
@@ -39,6 +43,9 @@ Do not include backend-owned fields such as `card_id`, `card_set_id`, `revision`
 `requires_parent_confirmation`, or `guardian_decision_id`.
 
 Cards must be confirmation questions, not parent statements. Do not assert that the parent should take a medicine, has no allergy, or has any unconfirmed medical fact.
+Do not write model-addressed medication questions such as "Should I take ibuprofen?"
+or "Does this conflict with my medicine?". Ask the pharmacist to check or explain instead,
+for example "Could you please check whether ibuprofen is suitable with my current medicines?"
 For `card_type`, you must choose:
 - `ask_to_write_down`: if the parent/user does not remember the medicine name, or if the drug name sounds phonetically similar/garbled (e.g., "listen to pro").
 - `ask_question`: for asking general questions or confirming dosage.

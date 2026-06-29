@@ -36,14 +36,15 @@ def make_event(text: str) -> TranscriptFinalEvent:
 async def test_router_handles_small_talk_and_greetings() -> None:
     router = RouterAgent()
 
-    # Greetings and help prompts should require response
+    # Greetings and help prompts should stay translation-only; they must not
+    # trigger medication response cards before a pharmacy risk appears.
     event_help = make_event("Hi, how can I help you today?")
     decision_help = await router.route(event_help)
-    assert decision_help.route_type == RouteType.RESPONSE_NEEDED
+    assert decision_help.route_type == RouteType.PASSIVE_TRANSLATION
 
     event_hello = make_event("Hello there!")
     decision_hello = await router.route(event_hello)
-    assert decision_hello.route_type == RouteType.RESPONSE_NEEDED
+    assert decision_hello.route_type == RouteType.PASSIVE_TRANSLATION
 
 
 @pytest.mark.anyio

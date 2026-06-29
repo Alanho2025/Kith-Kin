@@ -86,8 +86,12 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     # Compile summary draft
     draft_summary = await completion_service.prepare_summary(session_1.session_id, context_1)
     assert "coenzyme q10" in draft_summary.mentioned_drugs
-    assert draft_summary.follow_up_needed is True
-    assert draft_summary.family_notification_requested is True
+    assert draft_summary.pharmacist_advice_summary == (
+        "Pharmacist said: You should try Coenzyme Q10 for your muscle aches."
+    )
+    assert draft_summary.unresolved_questions == ()
+    assert draft_summary.follow_up_needed is False
+    assert draft_summary.family_notification_requested is False
 
     # Register and confirm SAVE_MEMORY card
     card_set_id = f"cards_{uuid4()}"
@@ -178,8 +182,8 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             ResponseCard(
                 card_id=f"card_{uuid4()}",
                 card_type=CardType.ASK_QUESTION,
-                zh_text="询问药剂师：我需要服用辅酶Q10吗？",
-                en_text="Ask pharmacist: Did you mean Coenzyme Q10?",
+                zh_text="请帮我确认您说的是辅酶Q10吗？",
+                en_text="Could you please confirm whether you meant Coenzyme Q10?",
                 risk_level=CardRiskLevel.NORMAL,
                 action=CardAction(type=CardActionType.NO_ACTION),
                 requires_parent_confirmation=True,
@@ -189,8 +193,8 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             ResponseCard(
                 card_id=f"card_{uuid4()}",
                 card_type=CardType.ASK_TO_WRITE_DOWN,
-                zh_text="请药剂师写下药品名",
-                en_text="Ask pharmacist to write down the drug name",
+                zh_text="请帮我写下药品名好吗？",
+                en_text="Could you please write down the medicine name?",
                 risk_level=CardRiskLevel.NORMAL,
                 action=CardAction(type=CardActionType.NO_ACTION),
                 requires_parent_confirmation=True,
@@ -200,8 +204,8 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             ResponseCard(
                 card_id=f"card_{uuid4()}",
                 card_type=CardType.ASK_QUESTION,
-                zh_text="请药剂师重复一遍",
-                en_text="Ask pharmacist to repeat",
+                zh_text="请您再重复一遍好吗？",
+                en_text="Could you please repeat that?",
                 risk_level=CardRiskLevel.NORMAL,
                 action=CardAction(type=CardActionType.NO_ACTION),
                 requires_parent_confirmation=True,

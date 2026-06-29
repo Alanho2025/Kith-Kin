@@ -133,7 +133,20 @@ def _card_text_is_unsafe(text: str) -> bool:
     if result is SafetyBackstopResult.BLOCK:
         return True
     lowered = text.lower()
+    normalized = " ".join(lowered.replace("\n", " ").split())
     unsafe_markers = (
+        "ask pharmacist:",
+        "ask pharmacist to",
+        "should i take",
+        "i should take",
+        "i will take",
+        "i can take",
+        "i have no allergies",
+        "i don't have allergies",
+        "i do not have allergies",
+        "does ibuprofen conflict",
+        "does this conflict",
+        "does this new drug cause allergies",
         "you can take this medicine",
         "you should take",
         "do not take",
@@ -158,4 +171,4 @@ def _card_text_is_unsafe(text: str) -> bool:
         "直接买这个药",
         "直接買這個藥",
     )
-    return any(marker in lowered for marker in unsafe_markers)
+    return any(marker in normalized for marker in unsafe_markers)

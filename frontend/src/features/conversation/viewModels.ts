@@ -20,7 +20,7 @@ export interface TranslationSegmentView {
 export interface ConversationTurnView {
   utteranceId: string;
   transcriptEventId: string;
-  speaker: "parent" | "pharmacist" | "unknown";
+  speaker: "parent" | "pharmacist" | "kk" | "system" | "unknown";
   sourceText: string;
   translatedText: string | null;
 }
@@ -45,6 +45,13 @@ export interface CardSetView {
   cardSetId: string;
   revision: number;
   cards: readonly ResponseCardView[];
+}
+
+export interface ProductOptionView {
+  name: string;
+  price: string | null;
+  pharmacistStatedUse: string | null;
+  pharmacistStatedCautions: string | null;
 }
 
 export interface ConfirmationView {
@@ -83,6 +90,7 @@ export interface ConversationState {
   turns: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
   activeCardSet: CardSetView | null;
+  productOptions: readonly ProductOptionView[];
   confirmation: ConfirmationView | null;
   guardianWarning: GuardianWarningView | null;
   visibleError: SafeRuntimeMessageView | null;

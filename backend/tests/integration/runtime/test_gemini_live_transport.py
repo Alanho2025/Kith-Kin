@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -11,7 +12,7 @@ from app.adapters.provider_schemas import (
     ProviderTranscriptEvent,
 )
 from app.core.config import Settings
-from app.core.constants import CardRiskLevel, GuardianDecisionType
+from app.core.constants import CardActionType, CardRiskLevel, GuardianDecisionType
 from app.domain.confirmation import CardSelectCommand
 from app.domain.credentials import TrustedRequestContext
 from app.main import create_app
@@ -22,6 +23,7 @@ from app.schemas.agent_outputs import (
     RouteReasonCode,
     RouteType,
 )
+from app.schemas.cards import CardAction, CardSet, CardType, ResponseCard
 from app.services.turn_orchestrator import TurnOutcome
 from tests.fixtures.cards.approved_card_sets import approved_card_set
 from tests.fixtures.clock import MutableClock
@@ -417,6 +419,72 @@ async def test_card_confirmation_is_the_only_path_that_requests_english_audio(
         assert socket.receive_json()["event_type"] == "audio.speaking"
 
     port.send_text.assert_awaited_once_with(card_set.cards[0].en_text)
+
+
+@pytest.mark.anyio
+async def test_non_speech_card_confirmation_does_not_request_english_audio(
+    live_app_client: TestClient,
+) -> None:
+    gateway = live_app_client.app.state.mock_live_gateway
+    port = MockSessionPort()
+    gateway.open_session.return_value = port
+    clock = MutableClock()
+
+    session_id = create_session(live_app_client)
+    issue_ticket(live_app_client, session_id)
+    request_context = TrustedRequestContext(
+        session_id=UUID(session_id),
+        user_id=live_app_client.app.state.user_id,
+        origin="test",
+    )
+    now = clock.now()
+    card = ResponseCard(
+        card_id="card-save-1",
+        card_type=CardType.MEMORY_ACTION,
+        zh_text="是否保存这次药房记录？确认后保存。",
+        en_text="Would you like Kith&Kin to save this pharmacy visit summary after you confirm?",
+        risk_level=CardRiskLevel.MEDICAL,
+        action=CardAction(type=CardActionType.SAVE_MEMORY),
+        requires_parent_confirmation=True,
+        requires_guardian_approval=True,
+        guardian_decision_id="guardian-save-1",
+    )
+    card_set = CardSet(
+        card_set_id="cards-save-1",
+        revision=1,
+        source_event_id="evt-final-save",
+        generated_at=now,
+        expires_at=now + timedelta(minutes=3),
+        cards=(card,),
+    )
+    live_app_client.app.state.card_service.register_card_set(card_set, request_context)
+    selected = await live_app_client.app.state.card_service.select(
+        CardSelectCommand(card_set.card_set_id, card.card_id, card_set.revision),
+        request_context,
+    )
+
+    with live_app_client.websocket_connect(
+        f"/api/sessions/{session_id}/live",
+        headers={"origin": ORIGIN},
+    ) as socket:
+        socket.receive_json()
+        socket.receive_json()
+        socket.send_json(
+            {
+                "schema_version": "0.1",
+                "event_id": "evt-card-confirm-save",
+                "event_type": "card.confirm",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {"confirmation_id": selected.confirmation_id},
+            }
+        )
+        confirmed = socket.receive_json()
+        assert confirmed["event_type"] == "card.confirmed"
+
+    port.send_text.assert_not_called()
 
 
 @pytest.mark.anyio

@@ -6,6 +6,7 @@ import type {
   ConversationRuntimeEvent,
   ConversationState,
   GuardianWarningView,
+  ProductOptionView,
   ResponseCardView,
   SafeRuntimeMessageView,
   TranslationSegmentView,
@@ -19,6 +20,7 @@ export const initialConversationState: ConversationState = {
   turns: [],
   chineseSegments: [],
   activeCardSet: null,
+  productOptions: [],
   confirmation: null,
   guardianWarning: null,
   visibleError: null,
@@ -60,6 +62,15 @@ interface RawCardSet {
   cardSetId?: string;
   revision?: number;
   cards?: RawCard[];
+}
+
+interface RawProductOption {
+  name?: string;
+  price?: string | null;
+  pharmacist_stated_use?: string | null;
+  pharmacistStatedUse?: string | null;
+  pharmacist_stated_cautions?: string | null;
+  pharmacistStatedCautions?: string | null;
 }
 
 
@@ -165,6 +176,18 @@ export function conversationReducer(
       } : null;
       return recordEvent(state, event, { activeCardSet: cardSet });
     }
+    case "product.options.render": {
+      const payload = event.payload as { options?: RawProductOption[] };
+      const productOptions: ProductOptionView[] = (payload.options || []).map((option) => ({
+        name: option.name || "",
+        price: option.price ?? null,
+        pharmacistStatedUse:
+          option.pharmacistStatedUse ?? option.pharmacist_stated_use ?? null,
+        pharmacistStatedCautions:
+          option.pharmacistStatedCautions ?? option.pharmacist_stated_cautions ?? null,
+      }));
+      return recordEvent(state, event, { productOptions });
+    }
     case "card.selected": {
       const payload = event.payload as {
         cardSetId: string;
@@ -191,7 +214,7 @@ export function conversationReducer(
             {
               utteranceId: `card-${event.eventId}`,
               transcriptEventId: event.eventId,
-              speaker: "parent" as const,
+              speaker: "kk" as const,
               sourceText: confirmedCard.enText,
               translatedText: confirmedCard.zhText,
             },

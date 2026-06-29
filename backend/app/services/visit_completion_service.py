@@ -42,95 +42,37 @@ class VisitCompletionService:
         if self._get_session_events is not None:
             events = self._get_session_events(session_id)
 
-        transcript_lines: list[str] = []
+        transcripts: list[tuple[str, str]] = []
         for event in events:
             if event.get("event_type") == "transcript.final":
                 payload = event.get("payload", {})
                 speaker = payload.get("speaker", "unknown")
                 text = payload.get("text", "")
-                if text:
-                    transcript_lines.append(f"{speaker}: {text}")
+                if isinstance(text, str) and text:
+                    transcripts.append((str(speaker), text.strip()))
 
-        full_text = " ".join(transcript_lines)
-        lower_text = full_text.lower()
+        all_text = " ".join(text for _speaker, text in transcripts)
+        pharmacist_lines = [
+            text for speaker, text in transcripts if speaker == "pharmacist"
+        ]
+        parent_questions = [
+            text
+            for speaker, text in transcripts
+            if speaker == "parent" and _looks_like_question(text)
+        ]
 
-        mentioned_drugs: list[str] = []
-        pharmacist_advice_summary = "Routine visit completed."
-        unresolved_questions: list[str] = []
-        follow_up_needed = False
-        family_notification_requested = False
-
-        # Match generic & brand drug names
-        # Perindopril + Ibuprofen (Scenario 01)
-        if "perindopril" in lower_text or "coversyl" in lower_text or "perindo" in lower_text:
-            mentioned_drugs.append("perindopril")
-        if "ibuprofen" in lower_text or "nurofen" in lower_text:
-            mentioned_drugs.append("ibuprofen")
-            pharmacist_advice_summary = (
-                "Pharmacist advised against Nurofen (ibuprofen) due to kidney risk and "
-                "blood pressure drug interaction with perindopril. Suggested Panadol instead."
-            )
-            follow_up_needed = True
-
-        # Warfarin + Voltaren (Scenario 02)
-        if "warfarin" in lower_text:
-            mentioned_drugs.append("warfarin")
-        if "voltaren" in lower_text or "diclofenac" in lower_text:
-            mentioned_drugs.append("voltaren")
-            pharmacist_advice_summary = (
-                "Pharmacist warned that Voltaren (diclofenac) with warfarin doubles bleeding risk. "
-                "Strongly advised Panadol instead."
-            )
-            follow_up_needed = True
-
-        # Amlodipine/Candesartan + Codral (Scenario 03)
-        if "amlodipine" in lower_text or "norvasc" in lower_text:
-            mentioned_drugs.append("amlodipine")
-        if "candesartan" in lower_text or "atacand" in lower_text:
-            mentioned_drugs.append("candesartan")
-        if "codral" in lower_text or "pseudoephedrine" in lower_text:
-            mentioned_drugs.append("codral")
-            pharmacist_advice_summary = (
-                "Pharmacist warned that Codral (pseudoephedrine) raises blood pressure. "
-                "Suggested saline nasal spray."
-            )
-            follow_up_needed = True
-
-        # Atorvastatin + Grapefruit (Scenario 04)
-        if "atorvastatin" in lower_text or "lipitor" in lower_text:
-            mentioned_drugs.append("atorvastatin")
-        if "grapefruit" in lower_text:
-            mentioned_drugs.append("grapefruit")
-            pharmacist_advice_summary = (
-                "Pharmacist advised limiting or avoiding grapefruit as it affects "
-                "Lipitor (atorvastatin) metabolism."
-            )
-            follow_up_needed = True
-
-        # Coenzyme Q10 (Scenario 05 / Hero Visit 1)
-        if (
-            "coenzyme q10" in lower_text
-            or "coenzyme" in lower_text
-            or "q10" in lower_text
-            or "coq10" in lower_text
-        ):
-            mentioned_drugs.append("coenzyme q10")
-            pharmacist_advice_summary = (
-                "Pharmacist suggested Coenzyme Q10 supplement for muscle aches."
-            )
-            unresolved_questions.append("Should I start taking Coenzyme Q10 for muscle aches?")
-            follow_up_needed = True
-            family_notification_requested = True
-
-        if not mentioned_drugs:
-            for drug in ["panadol", "paracetamol"]:
-                if drug in lower_text:
-                    mentioned_drugs.append("paracetamol")
+        mentioned_drugs = _extract_mentioned_drugs(all_text)
+        pharmacist_advice_summary = _summarize_pharmacist_lines(pharmacist_lines)
+        unresolved_questions = _unique_preserve(parent_questions)
+        follow_up_needed = bool(unresolved_questions) or _has_follow_up_marker(
+            pharmacist_advice_summary
+        )
+        family_notification_requested = _has_family_request(all_text)
 
         summary = SummaryReview(
-            mentioned_drugs=tuple(sorted(list(set(mentioned_drugs)))),
+            mentioned_drugs=tuple(mentioned_drugs),
             pharmacist_advice_summary=pharmacist_advice_summary,
-            unresolved_questions=tuple(sorted(unresolved_questions)),
+            unresolved_questions=tuple(unresolved_questions[:20]),
             follow_up_needed=follow_up_needed,
             family_notification_requested=family_notification_requested,
         )
@@ -194,3 +136,110 @@ class VisitCompletionExecutor(ConfirmedActionExecutor):
             phase="succeeded",
             code=None,
         )
+
+
+DRUG_ALIASES: dict[str, tuple[str, ...]] = {
+    "amlodipine": ("amlodipine", "norvasc"),
+    "atorvastatin": ("atorvastatin", "lipitor"),
+    "candesartan": ("candesartan", "atacand"),
+    "codral": ("codral", "pseudoephedrine"),
+    "coenzyme q10": ("coenzyme q10", "coq10", "q10"),
+    "grapefruit": ("grapefruit",),
+    "ibuprofen": ("ibuprofen", "nurofen"),
+    "paracetamol": ("paracetamol", "panadol"),
+    "perindopril": ("perindopril", "coversyl", "perindo"),
+    "voltaren": ("voltaren", "diclofenac"),
+    "warfarin": ("warfarin",),
+}
+
+
+def _extract_mentioned_drugs(text: str) -> list[str]:
+    lower_text = text.lower()
+    mentioned = {
+        canonical
+        for canonical, aliases in DRUG_ALIASES.items()
+        if any(alias in lower_text for alias in aliases)
+    }
+    return sorted(mentioned)
+
+
+def _summarize_pharmacist_lines(lines: list[str]) -> str:
+    if not lines:
+        return "No pharmacist medication instructions were recorded."
+    summary = "Pharmacist said: " + " ".join(_normalise_space(line) for line in lines)
+    if len(summary) <= 1000:
+        return summary
+    return f"{summary[:997].rstrip()}..."
+
+
+def _looks_like_question(text: str) -> bool:
+    lowered = text.strip().lower()
+    if "?" in lowered or "？" in lowered:
+        return True
+    return lowered.startswith(
+        (
+            "could you",
+            "can you",
+            "should i",
+            "would you",
+            "do you",
+            "does ",
+            "is ",
+            "are ",
+            "what ",
+            "which ",
+            "how ",
+            "when ",
+            "where ",
+            "why ",
+        )
+    )
+
+
+def _has_follow_up_marker(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "ask your doctor",
+            "check with your doctor",
+            "talk to your doctor",
+            "see your doctor",
+            "ask your gp",
+            "check with your gp",
+            "follow up",
+            "come back",
+        )
+    )
+
+
+def _has_family_request(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "send this to my family",
+            "send this summary to my family",
+            "notify my family",
+            "notify family",
+            "tell my daughter",
+            "tell my son",
+            "tell my family",
+        )
+    )
+
+
+def _unique_preserve(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        normalised = _normalise_space(item)
+        key = normalised.lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(normalised)
+    return unique
+
+
+def _normalise_space(text: str) -> str:
+    return " ".join(text.strip().split())

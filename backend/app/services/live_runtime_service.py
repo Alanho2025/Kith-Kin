@@ -19,7 +19,7 @@ from app.adapters.provider_schemas import (
     ProviderTranscriptEvent,
     TranslationRequest,
 )
-from app.core.constants import SCHEMA_VERSION, GuardianDecisionType
+from app.core.constants import SCHEMA_VERSION, CardActionType, GuardianDecisionType
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.runtime_events import (
     CardConfirmEvent,
@@ -27,6 +27,7 @@ from app.schemas.runtime_events import (
     parse_runtime_event,
 )
 from app.services.card_service import CardService
+from app.services.pharmacy_product_options import PharmacyProductOptionTracker
 from app.services.runtime_command_service import RuntimeCommandService
 from app.services.translation_service import TranslationService
 from app.services.turn_orchestrator import TurnOrchestrator
@@ -47,34 +48,15 @@ TRANSLATION_UNAVAILABLE_EN = (
 
 def _get_chinese_advice(en_text: str) -> str:
     lower = en_text.lower()
-    if "nurofen" in lower or "ibuprofen" in lower:
-        return (
-            "药剂师建议不要服用 Nurofen (布洛芬)，因为这与降血压药 Perindopril (培哚普利) "
-            "存在药物相互作用，有肾脏风险。建议使用 Panadol 代替。"
-        )
-    if "voltaren" in lower or "diclofenac" in lower:
-        return (
-            "药剂师警告说 Voltaren (双氯芬酸) 与 Warfarin (华法林) 同服会使出血风险翻倍。"
-            "强烈建议使用 Panadol 代替。"
-        )
-    if "codral" in lower or "pseudoephedrine" in lower:
-        return "药剂师警告说 Codral (伪麻黄碱) 会升高血压。建议使用生理盐水鼻喷雾剂。"
-    if "grapefruit" in lower:
-        return "药剂师建议限制或避免食用葡萄柚，因为它会影响 Lipitor (阿托伐他汀) 的代谢。"
-    if "coenzyme q10" in lower or "coq10" in lower:
-        return "药剂师建议服用辅酶 Q10 补充剂以缓解肌肉酸痛。"
+    if "no pharmacist medication instructions were recorded" in lower:
+        return "没有记录到药师的用药说明。"
     if "routine" in lower:
-        return "常规就诊已完成。"
-    return en_text
+        return "本次药局对话已结束。"
+    return f"药师原话摘要：{en_text}"
 
 
 def _get_chinese_question(en_q: str) -> str:
-    lower = en_q.lower()
-    if "coenzyme q10" in lower or "coq10" in lower:
-        return "我应该开始服用辅酶 Q10 来缓解肌肉酸痛吗？"
-    if "interacts" in lower or "interaction" in lower:
-        return "确认药物是否存在相互作用。"
-    return en_q
+    return f"待确认问题：{en_q}"
 
 
 class LiveRuntimeService:
@@ -107,12 +89,14 @@ class LiveRuntimeService:
         self._speech_sessions: set[UUID] = set()
         self._paused_sessions: set[UUID] = set()
         self._last_spoken_text: dict[UUID, str] = {}
+        self._product_options = PharmacyProductOptionTracker()
 
     def discard_session(self, session_id: UUID) -> None:
         self._buffers.pop(session_id, None)
         self._speech_sessions.discard(session_id)
         self._paused_sessions.discard(session_id)
         self._last_spoken_text.pop(session_id, None)
+        self._product_options.discard_session(str(session_id))
 
     async def serve(
         self,
@@ -412,6 +396,20 @@ class LiveRuntimeService:
                     correlation_id=source_event_id,
                 )
             )
+            if provider_event.speaker == "pharmacist":
+                product_snapshot = self._product_options.update(
+                    str(session_id),
+                    provider_event.text,
+                )
+                if product_snapshot is not None:
+                    emitted.append(
+                        self._append_event(
+                            session_id,
+                            "product.options.render",
+                            product_snapshot,
+                            correlation_id=source_event_id,
+                        )
+                    )
             return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
         fallback = result.fallback
         assert fallback is not None
@@ -960,7 +958,6 @@ class LiveRuntimeService:
                 )
             except Exception as e:
                 logger.warning("Card confirmation failed: %s", e)
-                from app.core.constants import CardActionType
 
                 err_event = self._append_event(
                     session_id,
@@ -988,12 +985,11 @@ class LiveRuntimeService:
             )
             await websocket.send_json(confirmed)
 
-            should_voice_action = confirmation_outcome.action_type.value in (
-                "speak",
-                "notify_family",
-                "save_memory",
+            should_voice_action = confirmation_outcome.action_type in (
+                CardActionType.SPEAK,
+                CardActionType.SHOW_TO_PHARMACIST,
             )
-            if confirmation_outcome.phase == "succeeded" or should_voice_action:
+            if confirmation_outcome.phase == "succeeded" and should_voice_action:
                 muted_evt = self._append_event(
                     session_id,
                     "audio.muted",

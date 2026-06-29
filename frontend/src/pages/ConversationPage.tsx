@@ -7,7 +7,11 @@ import { TwoLayerSubtitle } from "../components/TwoLayerSubtitle";
 import { useCardConfirmation } from "../features/conversation/hooks/useCardConfirmation";
 import { useLiveConversation } from "../features/conversation/hooks/useLiveConversation";
 import type { ConversationRuntime } from "../features/conversation/runtime/ConversationRuntime";
-import type { ConversationTurnView, RuntimeCommandView } from "../features/conversation/viewModels";
+import type {
+  ConversationTurnView,
+  ProductOptionView,
+  RuntimeCommandView,
+} from "../features/conversation/viewModels";
 import { VisitSummaryPage } from "./VisitSummaryPage";
 
 
@@ -49,17 +53,29 @@ function ConversationLog({ turns }: { turns: readonly ConversationTurnView[] }) 
     <>
       {deduplicatedTurns.map((turn) => {
         const isPharmacist = turn.speaker === "pharmacist";
+        const isKkRelay = turn.speaker === "kk";
+        const speakerLabel = isPharmacist
+          ? "医护人员"
+          : isKkRelay
+          ? "KK 代说"
+          : turn.speaker === "parent"
+          ? "老人原话"
+          : turn.speaker === "system"
+          ? "系统"
+          : "未知来源";
         return (
           <article
             key={turn.transcriptEventId}
             className={`max-w-[92%] rounded-lg border px-4 py-3 ${
               isPharmacist
                 ? "mr-auto border-slate-200 bg-slate-50"
+                : isKkRelay
+                ? "ml-auto border-sky-200 bg-sky-50"
                 : "ml-auto border-teal-200 bg-teal-50"
             }`}
           >
             <p className="text-sm font-bold text-slate-500">
-              {isPharmacist ? "医护人员" : "老人 / KK"}
+              {speakerLabel}
             </p>
             <p className="mt-1 text-lg font-bold leading-relaxed text-navy">
               {turn.translatedText || turn.sourceText}
@@ -73,6 +89,49 @@ function ConversationLog({ turns }: { turns: readonly ConversationTurnView[] }) 
         );
       })}
     </>
+  );
+}
+
+function ProductOptionsTable({ options }: { options: readonly ProductOptionView[] }) {
+  if (options.length === 0) return null;
+
+  return (
+    <section className="space-y-3" aria-label="药师说的产品选项">
+      <div>
+        <p className="text-sm font-bold uppercase text-teal-700">药师说的产品选项</p>
+        <h2 className="text-2xl font-bold text-navy">
+          只整理药师刚才说过的信息。
+        </h2>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-base">
+          <thead className="bg-slate-50 text-sm font-bold text-slate-600">
+            <tr>
+              <th scope="col" className="px-4 py-3">产品</th>
+              <th scope="col" className="px-4 py-3">药师说的用途</th>
+              <th scope="col" className="px-4 py-3">药师说的注意事项</th>
+              <th scope="col" className="px-4 py-3">价格</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 bg-white">
+            {options.map((option) => (
+              <tr key={option.name}>
+                <td className="px-4 py-3 font-bold text-navy">{option.name}</td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedUse || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedCautions || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 font-semibold text-slate-700">
+                  {option.price || "药师还没有报价"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -295,6 +354,8 @@ export function ConversationPage({
               partialEnglish={filteredPartialEnglish}
               chineseSegments={filteredChineseSegments}
             />
+
+            <ProductOptionsTable options={state.productOptions} />
 
             {/* State C: Inline Confirmation Panel */}
             {hasConfirmation && state.confirmation ? (

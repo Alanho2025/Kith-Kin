@@ -75,3 +75,35 @@ async def test_guardian_blocks_prompt_injection_in_card_text() -> None:
 
     assert decision.decision is GuardianDecisionType.BLOCK
     assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_FAILED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "en_text",
+    [
+        "Ask pharmacist: Does Ibuprofen conflict with my meds?",
+        "Should I take Coenzyme Q10?",
+        "I should take ibuprofen.",
+        "I have no allergies.",
+        "Ask pharmacist to write down the drug name",
+    ],
+)
+async def test_guardian_blocks_pharmacy_cards_that_are_not_parent_confirmation_questions(
+    en_text: str,
+) -> None:
+    decision = await GuardianAgent().review_cards(candidate_card_set(en_text))
+
+    assert decision.decision is GuardianDecisionType.BLOCK
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_FAILED
+
+
+@pytest.mark.anyio
+async def test_guardian_allows_parent_direct_question_to_pharmacist() -> None:
+    decision = await GuardianAgent().review_cards(
+        candidate_card_set(
+            "Could you please check whether ibuprofen is suitable with my current medicines?"
+        )
+    )
+
+    assert decision.decision is GuardianDecisionType.ALLOW
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_PASSED

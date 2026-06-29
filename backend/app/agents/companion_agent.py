@@ -451,21 +451,24 @@ class CompanionAgent(Agent):
                     {
                         "card_type": "memory_action",
                         "zh_text": "是否保存这次药房记录？确认后保存。",
-                        "en_text": "Save this pharmacy visit summary after confirmation.",
+                        "en_text": (
+                            "Would you like Kith&Kin to save this pharmacy visit summary "
+                            "after you confirm?"
+                        ),
                         "risk_level": "medical",
                         "action": {"type": "save_memory"},
                     },
                     {
                         "card_type": "ask_to_write_down",
-                        "zh_text": "请药剂师写下药房指示",
-                        "en_text": "Ask pharmacist to write down pharmacy instructions",
+                        "zh_text": "请帮我写下药房指示好吗？",
+                        "en_text": "Could you please write down the pharmacy instructions for me?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师重复一遍",
-                        "en_text": "Ask pharmacist to repeat",
+                        "zh_text": "请您再重复一遍好吗？",
+                        "en_text": "Could you please repeat that?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -480,21 +483,24 @@ class CompanionAgent(Agent):
                     {
                         "card_type": "family_action",
                         "zh_text": "是否发送药房沟通摘要给家人？",
-                        "en_text": "Send this pharmacy summary to family after confirmation.",
+                        "en_text": (
+                            "Would you like Kith&Kin to send this pharmacy summary to my "
+                            "family after I confirm?"
+                        ),
                         "risk_level": "medical",
                         "action": {"type": "notify_family"},
                     },
                     {
                         "card_type": "ask_to_write_down",
-                        "zh_text": "请药剂师写下处方详情",
-                        "en_text": "Ask pharmacist to write down prescription details",
+                        "zh_text": "请帮我写下处方详情好吗？",
+                        "en_text": "Could you please write down the prescription details for me?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师重复一遍",
-                        "en_text": "Ask pharmacist to repeat",
+                        "zh_text": "请您再重复一遍好吗？",
+                        "en_text": "Could you please repeat that?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -503,22 +509,25 @@ class CompanionAgent(Agent):
                 draft_cards = [
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请帮我確認衝突：這個藥會不會和我現在吃的降血壓藥衝突？",
-                        "en_text": "Does this conflict with my blood pressure medicine?",
+                        "zh_text": "请帮我确认这个药是否适合和我现在的降血压药一起用？",
+                        "en_text": (
+                            "Could you please check this medicine against my current "
+                            "blood pressure medicine?"
+                        ),
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_to_write_down",
-                        "zh_text": "请药剂师写下药品名",
-                        "en_text": "Ask pharmacist to write down the drug name",
+                        "zh_text": "请帮我写下药品名好吗？",
+                        "en_text": "Could you please write down the medicine name?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请向药剂师确认服用剂量",
-                        "en_text": "Ask pharmacist to confirm dosage",
+                        "zh_text": "请帮我确认用法用量好吗？",
+                        "en_text": "Could you please confirm the dosage instructions?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -527,22 +536,25 @@ class CompanionAgent(Agent):
                 draft_cards = [
                     {
                         "card_type": "ask_question",
-                        "zh_text": "询问药剂师：使用布洛芬是否与我目前的药物有冲突？",
-                        "en_text": "Ask pharmacist: Does Ibuprofen conflict with my meds?",
+                        "zh_text": "请帮我确认布洛芬是否适合和我现在的药一起用？",
+                        "en_text": (
+                            "Could you please check whether ibuprofen is suitable with "
+                            "my current medicines?"
+                        ),
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_to_write_down",
-                        "zh_text": "请药剂师写下药名",
-                        "en_text": "Ask pharmacist to write down the drug name",
+                        "zh_text": "请帮我写下药名好吗？",
+                        "en_text": "Could you please write down the medicine name?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师重复一遍",
-                        "en_text": "Ask pharmacist to repeat",
+                        "zh_text": "请您再重复一遍好吗？",
+                        "en_text": "Could you please repeat that?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -551,22 +563,28 @@ class CompanionAgent(Agent):
                 draft_cards = [
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请向药剂师确认我的过敏史",
-                        "en_text": "Ask pharmacist to confirm my allergies",
+                        "zh_text": "请帮我确认需要检查哪些药物过敏信息好吗？",
+                        "en_text": (
+                            "Could you please confirm what medicine allergy information "
+                            "you need to check?"
+                        ),
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "询问药剂师：这个新药会引起过敏吗？",
-                        "en_text": "Ask pharmacist: Does this new drug cause allergies?",
+                        "zh_text": "请告诉我使用这个药时要注意哪些过敏反应好吗？",
+                        "en_text": (
+                            "Could you please explain what allergy signs I should watch "
+                            "for with this medicine?"
+                        ),
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_to_write_down",
-                        "zh_text": "请药剂师重复一遍",
-                        "en_text": "Ask pharmacist to repeat",
+                        "zh_text": "请您再重复一遍好吗？",
+                        "en_text": "Could you please repeat that?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }
@@ -579,22 +597,28 @@ class CompanionAgent(Agent):
                     draft_cards = [
                         {
                             "card_type": "ask_question",
-                            "zh_text": "询问药剂师：我需要服用辅酶Q10吗？",
-                            "en_text": "Ask pharmacist: Should I take Coenzyme Q10?",
+                            "zh_text": "请帮我确认辅酶Q10是否适合和我现在的药一起用？",
+                            "en_text": (
+                                "Could you please check whether Coenzyme Q10 is suitable "
+                                "with my current medicines?"
+                            ),
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
                         {
                             "card_type": "ask_question",
-                            "zh_text": "请向药剂师确认我的处方药",
-                            "en_text": "Ask pharmacist to confirm my prescription",
+                            "zh_text": "请帮我确认我要领取哪些处方药好吗？",
+                            "en_text": (
+                                "Could you please confirm which prescription medicines "
+                                "I am picking up?"
+                            ),
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
                         {
                             "card_type": "ask_question",
-                            "zh_text": "请药剂师重复一遍",
-                            "en_text": "Ask pharmacist to repeat",
+                            "zh_text": "请您再重复一遍好吗？",
+                            "en_text": "Could you please repeat that?",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         }
@@ -603,22 +627,28 @@ class CompanionAgent(Agent):
                     draft_cards = [
                         {
                             "card_type": "ask_question",
-                            "zh_text": "请向药剂师确认我的处方药",
-                            "en_text": "Ask pharmacist to confirm my prescription",
+                            "zh_text": "请帮我确认我要领取哪些处方药好吗？",
+                            "en_text": (
+                                "Could you please confirm which prescription medicines "
+                                "I am picking up?"
+                            ),
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
                         {
                             "card_type": "ask_question",
-                            "zh_text": "询问药剂师：我有几种处方药要拿？",
-                            "en_text": "Ask pharmacist: How many prescriptions to pick up?",
+                            "zh_text": "请帮我确认我今天要领取几种处方药好吗？",
+                            "en_text": (
+                                "Could you please confirm how many prescriptions "
+                                "I am picking up today?"
+                            ),
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         },
                         {
                             "card_type": "ask_question",
-                            "zh_text": "请药剂师重复一遍",
-                            "en_text": "Ask pharmacist to repeat",
+                            "zh_text": "请您再重复一遍好吗？",
+                            "en_text": "Could you please repeat that?",
                             "risk_level": "normal",
                             "action": {"type": "no_action"},
                         }
@@ -627,22 +657,22 @@ class CompanionAgent(Agent):
                 draft_cards = [
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师重复一遍",
-                        "en_text": "Ask pharmacist to repeat",
+                        "zh_text": "请您再重复一遍好吗？",
+                        "en_text": "Could you please repeat that?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师说慢一点",
-                        "en_text": "Ask pharmacist to speak slowly",
+                        "zh_text": "请您说慢一点好吗？",
+                        "en_text": "Could you please speak a little slower?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     },
                     {
                         "card_type": "ask_question",
-                        "zh_text": "请药剂师写下来",
-                        "en_text": "Ask pharmacist to write it down",
+                        "zh_text": "请您帮我写下来好吗？",
+                        "en_text": "Could you please write that down for me?",
                         "risk_level": "normal",
                         "action": {"type": "no_action"},
                     }

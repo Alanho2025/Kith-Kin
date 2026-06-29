@@ -187,6 +187,45 @@ describe("ConversationPage", () => {
     expect(screen.getByText("安全检查详情")).toBeInTheDocument();
   });
 
+  it("renders neutral pharmacist-stated product options", async () => {
+    const productFlow = [
+      {
+        schemaVersion: "0.1",
+        eventId: "evt-products-1",
+        eventType: "product.options.render",
+        sessionId: "ses-products",
+        sequence: 1,
+        timestamp: "2026-06-22T00:00:00Z",
+        correlationId: null,
+        payload: {
+          options: [
+            {
+              name: "paracetamol",
+              price: "6 dollars",
+              pharmacistStatedUse: "usually used for pain or fever",
+              pharmacistStatedCautions: null,
+            },
+            {
+              name: "ibuprofen",
+              price: "9 dollars",
+              pharmacistStatedUse: null,
+              pharmacistStatedCautions: "may not be suitable with certain medicines",
+            },
+          ],
+        },
+      },
+    ];
+
+    const runtime = new MockConversationRuntime(productFlow);
+    render(<ConversationPage runtime={runtime} sessionId="ses-products" />);
+
+    expect(await screen.findByText("药师说的产品选项")).toBeInTheDocument();
+    expect(screen.getByText("paracetamol")).toBeInTheDocument();
+    expect(screen.getByText("6 dollars")).toBeInTheDocument();
+    expect(screen.getByText("usually used for pain or fever")).toBeInTheDocument();
+    expect(screen.queryByText(/best option/i)).not.toBeInTheDocument();
+  });
+
   it("filters out system reasoning from subtitles and logs in user mode", async () => {
     const reasoningFlow = [
       {
