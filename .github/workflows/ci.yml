@@ -15,9 +15,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
+
+      - name: Install frontend deps
+        id: setup_frontend_offline
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck (frontend)
+        id: frontend_typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Unit tests (frontend)
+        id: frontend_test
+        working-directory: frontend
+        run: npm run test
+
+      - name: Lint (frontend)
+        id: frontend_lint
+        working-directory: frontend
+        run: npm run lint
 
       - name: Install backend deps
         id: setup_backend
@@ -35,10 +59,15 @@ jobs:
         working-directory: backend
         run: uv run pytest -q -p no:cacheprovider
 
-      - name: Eval contract (offline, enforces 17 cases)
+      - name: Eval contract (offline, enforces 24 cases)
         id: eval_contract
         working-directory: backend
         run: uv run python -m pytest ../evals/test_runner.py -q
+
+      - name: Deterministic eval suite (offline, 24 cases)
+        id: deterministic_eval
+        working-directory: backend
+        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
 
       # Soft gates: informational only, does not block PR
       - name: Ruff (informational)
@@ -91,7 +120,7 @@ jobs:
         working-directory: backend
         run: uv run python ../scripts/seed_demo_data.py --database-url sqlite+aiosqlite:///kithkin.db
 
-      - name: Real Gemini eval gate (17 cases)
+      - name: Real Gemini eval gate (24 cases)
         id: real_eval
         working-directory: backend
         run: uv run python ../evals/run.py ../evals/cases.json --require-live-companion --report /tmp/eval_report.json
@@ -128,8 +157,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check Category | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Offline Gates** | $(get_emoji $offline_res) | Security Scan, Pytests, and Eval Contract checks |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Live Gates (Gemini)** | $(get_emoji $live_res) | Real LLM Evals and Playwright E2E Tests |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Offline Gates** | $(get_emoji $offline_res) | Frontend typecheck/lint/tests, Security Scan, Backend Pytest, Eval Contract, and deterministic 24-case eval suite |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Live Gates (Gemini)** | $(get_emoji $live_res) | Real 24-case LLM Eval suite and Playwright E2E Tests |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "$offline_res" = "failure" ] || [ "$live_res" = "failure" ]; then

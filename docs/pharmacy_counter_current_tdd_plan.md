@@ -10,7 +10,7 @@ Commands run:
 
 - `npm run typecheck` in `frontend`: pass
 - `npm run lint` in `frontend`: pass
-- `npm run test` in `frontend`: 13 files, 52 tests passed after the latest large-print subtitle correction
+- `npm run test` in `frontend`: 14 files, 53 tests passed after the latest large-print subtitle correction and Playwright CI database-path regression test
 - `backend/.venv/bin/python -m pytest backend/tests`: 264 passed, 1 skipped, 6 warnings
 - `backend/.venv/bin/python -m pytest backend/tests/integration/mcp/test_seed_demo_data.py backend/tests/integration/mcp/test_drug_interaction.py`: 8 passed after the seed expansion
 - `backend/.venv/bin/python evals/run.py evals/cases.json --report output/evals/conversation-debug-report.json`: 24/24 passed, 23/23 P0 passed
@@ -20,7 +20,7 @@ Important reading of this baseline:
 
 - The Round 1 deterministic gaps are green in tests/evals. The strengthened real-backend browser flow is now green after the Notion-review fixes and the latest large-print subtitle correction.
 - The old no-audio failure is fixed for confirmed cards through the dedicated Gemini TTS path. The live run now logs `gemini_tts.synthesize.ok`, `live.card_tts.audio_sent`, browser `runtime.websocket.audio.in`, and `audio_player.play.scheduled`.
-- The old "did it read the database?" question is now observable and separated from card logic. With seeded demo data, the allergy/safety question logs `tool.memory_search.result record_count=3`, `turn.profile_lookup.result allergy_count=1 medication_count=1`.
+- The old "did it read the database?" question is now observable and separated from card logic. With seeded demo data, the allergy/safety question logs `tool.memory_search.result record_count=4`, `turn.profile_lookup.result allergy_count=1 medication_count=1`.
 - The previous browser red failure was card generation/review: after the profile lookup succeeded, ADK proposed cards but deterministic review returned `card_review=block`, then runtime emitted `live.cards.review_failed` and `fallback.show`, so the UI had no allergy card to confirm. That failure is now covered by deterministic safe replacement cards and the backend smoke verified the allergy card can be confirmed.
 - Product clarification from 2026-06-30: the left large-print translation area is not append-only. It must show only the latest faithful pharmacist translation. Conversation history belongs in the right log, debug trace, and turn history.
 

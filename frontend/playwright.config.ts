@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 
 function loadGoogleApiKey(): string {
@@ -21,7 +22,14 @@ function loadGoogleApiKey(): string {
 }
 
 const googleApiKey = loadGoogleApiKey();
-const liveDatabaseUrl = `sqlite+aiosqlite:////private/tmp/kithkin_playwright_live_${process.pid}.db`;
+
+export function createLiveDatabaseUrl(pid = process.pid): string {
+  const tempRoot = process.env.RUNNER_TEMP || os.tmpdir();
+  const databasePath = path.join(tempRoot, `kithkin_playwright_live_${pid}.db`);
+  return `sqlite+aiosqlite:///${databasePath}`;
+}
+
+const liveDatabaseUrl = createLiveDatabaseUrl();
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
 const backendCommand = [
   `.venv/bin/python ../scripts/seed_demo_data.py --database-url ${liveDatabaseUrl}`,

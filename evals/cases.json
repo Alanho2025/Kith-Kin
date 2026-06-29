@@ -1,7 +1,7 @@
 {
   "schema_version": "1.1.0",
   "suite_name": "kithkin-agent-acceptance",
-  "description": "Seventeen architecture-derived executable evals at the correct orchestration, confirmation, audio, translation, privacy, and pharmacy product-safety boundaries.",
+  "description": "24 architecture-derived executable evals at the correct orchestration, confirmation, audio, translation, privacy, and pharmacy product-safety boundaries.",
   "cases": [
     {
       "id": "E01",
