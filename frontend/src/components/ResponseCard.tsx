@@ -1,4 +1,5 @@
 import type { ResponseCardView } from "../features/conversation/viewModels";
+import { conversationDebug } from "../features/conversation/debugLog";
 
 
 interface ResponseCardProps {
@@ -17,7 +18,14 @@ export function ResponseCard({
   return (
     <button
       type="button"
-      onClick={() => onSelect(card)}
+      onClick={() => {
+        conversationDebug("response_card.click", {
+          intentLabel,
+          recommended,
+          card,
+        });
+        onSelect(card);
+      }}
       className="group w-full rounded-2xl border-2 border-slate-200 bg-white px-5 py-5 text-left transition hover:border-teal-600 hover:bg-teal-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-300"
       aria-label={`${card.zhText}，点击后确认`}
     >

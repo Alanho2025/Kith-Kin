@@ -12,9 +12,11 @@ from app.adapters.provider_schemas import (
     ProviderAudioEvent,
     ProviderLiveEventType,
     ProviderTranscriptEvent,
+    SynthesizedSpeech,
 )
 from app.core.config import Settings
 from app.core.constants import CardActionType, CardRiskLevel, GuardianDecisionType
+from app.core.conversation_debug import observe_conversation_logs
 from app.domain.confirmation import CardSelectCommand
 from app.domain.credentials import TrustedRequestContext
 from app.main import create_app
@@ -87,6 +89,13 @@ def live_app_client(tmp_path: Path) -> TestClient:
     app = create_app(settings=settings, clock=clock.now)
     app.state.mock_live_gateway = AsyncMock()
     app.state.live_runtime_service._live_gateway = app.state.mock_live_gateway
+    app.state.mock_tts_gateway = AsyncMock()
+    app.state.mock_tts_gateway.synthesize.return_value = SynthesizedSpeech(
+        audio=b"\x05\x06\x07\x08",
+        mime_type="audio/pcm",
+        sample_rate_hz=24000,
+    )
+    app.state.live_runtime_service._tts_gateway = app.state.mock_tts_gateway
 
     # Mock the translation gateway to prevent hitting the real network
     mock_translation_gateway = AsyncMock()
@@ -372,7 +381,7 @@ async def test_turn_orchestrator_receives_recent_session_context(
 
 
 @pytest.mark.anyio
-async def test_card_confirmation_is_the_only_path_that_requests_english_audio(
+async def test_card_confirmation_uses_dedicated_tts_and_forwards_audio(
     live_app_client: TestClient,
 ) -> None:
     gateway = live_app_client.app.state.mock_live_gateway
@@ -420,39 +429,30 @@ async def test_card_confirmation_is_the_only_path_that_requests_english_audio(
         assert confirmed["event_type"] == "card.confirmed"
         assert socket.receive_json()["event_type"] == "audio.muted"
         assert socket.receive_json()["event_type"] == "audio.speaking"
+        started = socket.receive_json()
+        assert started["event_type"] == "card.action.status"
+        assert started["payload"]["phase"] == "started"
+        assert socket.receive_bytes() == b"\x05\x06\x07\x08"
+        completed = socket.receive_json()
+        assert completed["event_type"] == "audio.speaking"
+        assert completed["payload"]["phase"] == "completed"
+        succeeded = socket.receive_json()
+        assert succeeded["event_type"] == "card.action.status"
+        assert succeeded["payload"]["phase"] == "succeeded"
 
-    port.send_text.assert_awaited_once_with(card_set.cards[0].en_text)
+    live_app_client.app.state.mock_tts_gateway.synthesize.assert_awaited_once_with(
+        card_set.cards[0].en_text
+    )
+    port.send_text.assert_not_called()
 
 
 @pytest.mark.anyio
-async def test_confirmed_card_provider_audio_is_forwarded_as_websocket_binary(
+async def test_confirmed_card_tts_logs_audio_success(
     live_app_client: TestClient,
 ) -> None:
+    observed_logs = []
     service = live_app_client.app.state.live_runtime_service
     port = MockSessionPort()
-    port._events_list.extend(
-        [
-            ProviderAudioEvent(
-                event_type=ProviderLiveEventType.AUDIO,
-                provider_event_id="provider-audio-1",
-                audio=b"\x01\x02",
-            ),
-            ProviderAudioEvent(
-                event_type=ProviderLiveEventType.AUDIO,
-                provider_event_id="provider-audio-2",
-                audio=b"\x03\x04",
-            ),
-            ProviderTranscriptEvent(
-                event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
-                provider_event_id="provider-turn-complete",
-                utterance_id="turn_complete",
-                speaker="pharmacist",
-                language="en",
-                text="",
-                revision=1,
-            ),
-        ]
-    )
     port._closed = True
     clock = MutableClock()
     session_id = create_session(live_app_client)
@@ -469,46 +469,52 @@ async def test_confirmed_card_provider_audio_is_forwarded_as_websocket_binary(
     )
     websocket = CapturingWebSocket()
 
-    await service._handle_live_command(
-        websocket,
-        UUID(session_id),
-        json.dumps({
-            "schema_version": "0.1",
-            "event_id": "evt-card-confirm-audio",
-            "event_type": "card.confirm",
-            "session_id": session_id,
-            "sequence": 3,
-            "timestamp": "2026-06-22T13:00:00Z",
-            "correlation_id": None,
-            "payload": {"confirmation_id": selected.confirmation_id},
-        }),
-        port,
-    )
-    await service._read_provider_loop(websocket, UUID(session_id), port)
+    with observe_conversation_logs(
+        lambda label, payload: observed_logs.append((label, payload))
+    ):
+        await service._handle_live_command(
+            websocket,
+            UUID(session_id),
+            json.dumps({
+                "schema_version": "0.1",
+                "event_id": "evt-card-confirm-audio",
+                "event_type": "card.confirm",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {"confirmation_id": selected.confirmation_id},
+            }),
+            port,
+        )
 
-    assert websocket.binary_events == [b"\x01\x02", b"\x03\x04"]
+    assert websocket.binary_events == [b"\x05\x06\x07\x08"]
     assert any(
         event["event_type"] == "audio.speaking" and event["payload"]["phase"] == "completed"
         for event in websocket.json_events
     )
+    observed_labels = [label for label, _payload in observed_logs]
+    assert "live.card_confirm.received" in observed_labels
+    assert "live.card_tts.request" in observed_labels
+    assert "live.card_tts.audio_ready" in observed_labels
+    assert "live.card_tts.audio_sent" in observed_labels
+    succeeded = next(
+        payload
+        for label, payload in observed_logs
+        if label == "live.card_action.status" and payload["phase"] == "succeeded"
+    )
+    assert succeeded["code"] is None
 
 
 @pytest.mark.anyio
-async def test_provider_turn_complete_without_audio_does_not_fake_speaking_completed(
+async def test_tts_failure_does_not_fake_speaking_completed(
     live_app_client: TestClient,
 ) -> None:
+    observed_logs = []
     service = live_app_client.app.state.live_runtime_service
     port = MockSessionPort()
-    port._events_list.append(
-        ProviderTranscriptEvent(
-            event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
-            provider_event_id="provider-turn-complete-no-audio",
-            utterance_id="turn_complete",
-            speaker="pharmacist",
-            language="en",
-            text="",
-            revision=1,
-        )
+    live_app_client.app.state.mock_tts_gateway.synthesize.side_effect = RuntimeError(
+        "no audio"
     )
     port._closed = True
     clock = MutableClock()
@@ -526,22 +532,24 @@ async def test_provider_turn_complete_without_audio_does_not_fake_speaking_compl
     )
     websocket = CapturingWebSocket()
 
-    await service._handle_live_command(
-        websocket,
-        UUID(session_id),
-        json.dumps({
-            "schema_version": "0.1",
-            "event_id": "evt-card-confirm-no-audio",
-            "event_type": "card.confirm",
-            "session_id": session_id,
-            "sequence": 3,
-            "timestamp": "2026-06-22T13:00:00Z",
-            "correlation_id": None,
-            "payload": {"confirmation_id": selected.confirmation_id},
-        }),
-        port,
-    )
-    await service._read_provider_loop(websocket, UUID(session_id), port)
+    with observe_conversation_logs(
+        lambda label, payload: observed_logs.append((label, payload))
+    ):
+        await service._handle_live_command(
+            websocket,
+            UUID(session_id),
+            json.dumps({
+                "schema_version": "0.1",
+                "event_id": "evt-card-confirm-no-audio",
+                "event_type": "card.confirm",
+                "session_id": session_id,
+                "sequence": 3,
+                "timestamp": "2026-06-22T13:00:00Z",
+                "correlation_id": None,
+                "payload": {"confirmation_id": selected.confirmation_id},
+            }),
+            port,
+        )
 
     assert websocket.binary_events == []
     assert not any(
@@ -553,6 +561,15 @@ async def test_provider_turn_complete_without_audio_does_not_fake_speaking_compl
         and "AUDIO" in json.dumps(event["payload"])
         for event in websocket.json_events
     )
+    observed_labels = [label for label, _payload in observed_logs]
+    assert "live.card_tts.request" in observed_labels
+    assert "live.card_tts.failed" in observed_labels
+    failed_status = next(
+        payload
+        for label, payload in observed_logs
+        if label == "live.card_action.status" and payload["phase"] == "failed"
+    )
+    assert failed_status["code"] == "AUDIO_DELIVERY_FAILED"
 
 
 @pytest.mark.anyio

@@ -23,6 +23,10 @@ function loadGoogleApiKey(): string {
 const googleApiKey = loadGoogleApiKey();
 const liveDatabaseUrl = `sqlite+aiosqlite:////private/tmp/kithkin_playwright_live_${process.pid}.db`;
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
+const backendCommand = [
+  `.venv/bin/python ../scripts/seed_demo_data.py --database-url ${liveDatabaseUrl}`,
+  ".venv/bin/python -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+].join(" && ");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -55,7 +59,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: ".venv/bin/python -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+      command: backendCommand,
       cwd: "../backend",
       env: {
         ...process.env,

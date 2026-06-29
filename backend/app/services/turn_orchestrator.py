@@ -26,6 +26,7 @@ from app.agents.companion_agent import (
 )
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.core.constants import GuardianDecisionType
+from app.core.conversation_debug import conversation_log, session_ref
 from app.domain.credentials import TrustedRequestContext
 from app.schemas.agent_outputs import (
     CardSetProposal,
@@ -145,6 +146,14 @@ class TurnOrchestrator:
         """
         proposal: CardSetProposal | None = None
         card_review: GuardianDecision | None = None
+        conversation_log(
+            "turn.process.start",
+            session=session_ref(event.session_id),
+            event_id=event.event_id,
+            speaker=event.payload.speaker,
+            language=event.payload.language,
+            transcript_text=event.payload.text,
+        )
 
         # Fallback for legacy unit tests (e.g., test_turn_orchestrator.py)
         if self._mcp_tool_adapter_factory is None:
@@ -153,6 +162,16 @@ class TurnOrchestrator:
                 guardian_task = tg.create_task(self._guardian.review_turn(event))
             route = router_task.result()
             guardian = guardian_task.result()
+            conversation_log(
+                "turn.route_guardian.result",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                route_type=route.route_type.value,
+                route_reason=route.reason_code.value,
+                guardian_decision=guardian.decision.value,
+                guardian_reason=guardian.reason_code.value,
+                legacy_path=True,
+            )
             if guardian.decision is GuardianDecisionType.BLOCK:
                 return TurnOutcome(route, guardian, None, None)
             _NO_COMPANION_ROUTES = {
@@ -169,6 +188,15 @@ class TurnOrchestrator:
                 guardian.guardian_decision_id,
             )
             card_review = await self._guardian.review_cards(proposal.card_set)
+            conversation_log(
+                "turn.cards.proposed",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                card_count=len(proposal.card_set.cards),
+                action_types=tuple(card.action.type.value for card in proposal.card_set.cards),
+                card_review=card_review.decision.value,
+                legacy_path=True,
+            )
             if card_review.decision is GuardianDecisionType.ALLOW:
                 proposal = approve_card_proposal(proposal, card_review)
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
@@ -180,6 +208,16 @@ class TurnOrchestrator:
             guardian_task = tg.create_task(self._guardian.review_turn(event))
         route = router_task.result()
         guardian = guardian_task.result()
+        conversation_log(
+            "turn.route_guardian.result",
+            session=session_ref(event.session_id),
+            event_id=event.event_id,
+            route_type=route.route_type.value,
+            route_reason=route.reason_code.value,
+            guardian_decision=guardian.decision.value,
+            guardian_reason=guardian.reason_code.value,
+            legacy_path=False,
+        )
         if guardian.decision is GuardianDecisionType.BLOCK:
             return TurnOutcome(route, guardian, None, None)
         no_companion_routes = {
@@ -188,6 +226,12 @@ class TurnOrchestrator:
             RouteType.FALLBACK,
         }
         if route.route_type in no_companion_routes:
+            conversation_log(
+                "turn.companion.skipped",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                route_type=route.route_type.value,
+            )
             return TurnOutcome(route, guardian, None, None)
 
         # 1. Instantiate the ADK session and runner
@@ -203,6 +247,12 @@ class TurnOrchestrator:
         allergies: list[Any] = []
         if route.route_type is RouteType.PHARMACY_RISK:
             try:
+                conversation_log(
+                    "turn.profile_lookup.start",
+                    session=session_ref(event.session_id),
+                    event_id=event.event_id,
+                    route_type=route.route_type.value,
+                )
                 profile_res = await mcp_adapter.memory_search("profile", ("profile",))
                 if profile_res.ok and profile_res.data:
                     for record in profile_res.data.records:
@@ -222,8 +272,22 @@ class TurnOrchestrator:
                             if isinstance(content, dict):
                                 meds.extend(content.get("medications", []))
                                 allergies.extend(content.get("allergies", []))
+                conversation_log(
+                    "turn.profile_lookup.result",
+                    session=session_ref(event.session_id),
+                    event_id=event.event_id,
+                    ok=profile_res.ok,
+                    status=getattr(profile_res.status, "value", str(profile_res.status)),
+                    medication_count=len(meds),
+                    allergy_count=len(allergies),
+                )
             except Exception:
                 logger.warning("Failed to warm patient profile in turn orchestrator")
+                conversation_log(
+                    "turn.profile_lookup.failed",
+                    session=session_ref(event.session_id),
+                    event_id=event.event_id,
+                )
 
             # Deterministic drug-interaction safety check: if the turn names a
             # specific drug, always run check_drug_interaction — don't rely on the
@@ -235,9 +299,22 @@ class TurnOrchestrator:
                 new_drug = named_drugs[0]
                 current_meds = tuple([*named_drugs[1:], *meds])
                 try:
+                    conversation_log(
+                        "turn.deterministic_drug_check.start",
+                        session=session_ref(event.session_id),
+                        event_id=event.event_id,
+                        new_drug=new_drug,
+                        current_med_count=len(current_meds),
+                    )
                     await mcp_adapter.check_drug_interaction(new_drug, current_meds)
                 except Exception:
                     logger.warning("Deterministic drug-interaction check failed")
+                    conversation_log(
+                        "turn.deterministic_drug_check.failed",
+                        session=session_ref(event.session_id),
+                        event_id=event.event_id,
+                        new_drug=new_drug,
+                    )
 
         prior_summary = None
         if getattr(companion_any, "_session_service", None) is not None:
@@ -322,6 +399,14 @@ class TurnOrchestrator:
         ).message
 
         try:
+            conversation_log(
+                "turn.companion.run.start",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                medication_count=len(meds),
+                allergy_count=len(allergies),
+                has_prior_summary=prior_summary is not None,
+            )
             await _run_adk_runner_with_retries(
                 runner,
                 user_id=user_id,
@@ -330,6 +415,12 @@ class TurnOrchestrator:
             )
         except Exception as e:
             logger.exception("ADK session execution failed")
+            conversation_log(
+                "turn.companion.run.failed",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                error=type(e).__name__,
+            )
             raise ValueError("COMPANION_UNAVAILABLE") from e
 
         # Extract results from the session state
@@ -387,8 +478,32 @@ class TurnOrchestrator:
 
             if card_review.decision is GuardianDecisionType.ALLOW:
                 proposal = approve_card_proposal(proposal, card_review)
+            conversation_log(
+                "turn.cards.proposed",
+                session=session_ref(event.session_id),
+                event_id=event.event_id,
+                card_count=len(proposal.card_set.cards),
+                action_types=tuple(card.action.type.value for card in proposal.card_set.cards),
+                card_review=card_review.decision.value,
+            )
             # Register card set if allowed
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)
+                conversation_log(
+                    "turn.cards.registered",
+                    session=session_ref(event.session_id),
+                    event_id=event.event_id,
+                    card_set_id=proposal.card_set.card_set_id,
+                    card_count=len(proposal.card_set.cards),
+                )
 
+        conversation_log(
+            "turn.process.complete",
+            session=session_ref(event.session_id),
+            event_id=event.event_id,
+            route_type=route.route_type.value,
+            guardian_decision=guardian.decision.value,
+            has_card_proposal=proposal is not None,
+            card_review=card_review.decision.value if card_review is not None else None,
+        )
         return TurnOutcome(route, guardian, proposal, card_review)

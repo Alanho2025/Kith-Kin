@@ -50,6 +50,23 @@ class ProviderAudioEvent:
 
 
 @dataclass(frozen=True)
+class SynthesizedSpeech:
+    """Normalised text-to-speech audio returned as browser-playable PCM."""
+
+    audio: bytes
+    mime_type: str
+    sample_rate_hz: int
+
+
+class TextToSpeechGateway(Protocol):
+    """Boundary for deterministic confirmed-card speech synthesis."""
+
+    async def synthesize(self, text: str) -> SynthesizedSpeech:
+        """Generate one spoken audio buffer for already-confirmed text."""
+        ...
+
+
+@dataclass(frozen=True)
 class ProviderToolCallEvent:
     """Normalised tool-call request without provider internals."""
 

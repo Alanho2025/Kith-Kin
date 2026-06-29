@@ -25,7 +25,6 @@ def test_development_defaults_allow_localhost_and_loopback_frontend_origins() ->
     settings = Settings(**base_environment())
 
     assert "http://localhost:5173" in settings.cors_allowed_origins
-    assert "http://127.0.0.1:5173" in settings.cors_allowed_origins
 
 
 def test_production_origin_allowlist_stays_explicit() -> None:

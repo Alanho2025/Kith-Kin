@@ -1,3 +1,5 @@
+import { conversationDebug } from "../debugLog";
+
 type WindowWithWebkitAudioContext = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -25,15 +27,28 @@ export class AudioRecorder {
   private processorNode: ScriptProcessorNode | null = null;
   private socketSend: ((data: ArrayBuffer) => void) | null = null;
   private isPaused = false;
+  private capturedFrameCount = 0;
 
   async start(sendFn: (data: ArrayBuffer) => void): Promise<void> {
-    if (!isBrowser) return;
-    if (this.audioContext) return;
+    conversationDebug("audio_recorder.start.request", {
+      isBrowser,
+      alreadyStarted: this.audioContext !== null,
+    });
+    if (!isBrowser) {
+      conversationDebug("audio_recorder.start.skipped_not_browser");
+      return;
+    }
+    if (this.audioContext) {
+      conversationDebug("audio_recorder.start.already_started");
+      return;
+    }
 
     this.socketSend = sendFn;
     this.isPaused = false;
+    this.capturedFrameCount = 0;
 
     try {
+      conversationDebug("audio_recorder.get_user_media.request");
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       // Create context with sampleRate 16000 directly if browser supports it,
       // otherwise use default and downsample in ScriptProcessor
@@ -45,6 +60,15 @@ export class AudioRecorder {
 
       const inputRate = this.audioContext.sampleRate;
       const targetRate = 16000;
+      conversationDebug("audio_recorder.start.ready", {
+        inputRate,
+        targetRate,
+        audioTracks: this.mediaStream.getAudioTracks().map((track) => ({
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState,
+        })),
+      });
 
       this.processorNode.onaudioprocess = (e) => {
         if (this.isPaused || !this.socketSend) return;
@@ -52,12 +76,22 @@ export class AudioRecorder {
         const pcmData = this.downsampleAndConvert(inputData, inputRate, targetRate);
         const frame = new ArrayBuffer(pcmData.byteLength);
         new Int16Array(frame).set(pcmData);
+        this.capturedFrameCount += 1;
+        if (this.capturedFrameCount === 1 || this.capturedFrameCount % 50 === 0) {
+          conversationDebug("audio_recorder.frame.capture", {
+            frameCount: this.capturedFrameCount,
+            inputSamples: inputData.length,
+            pcmSamples: pcmData.length,
+            byteLength: frame.byteLength,
+          });
+        }
         this.socketSend(frame);
       };
 
       this.sourceNode.connect(this.processorNode);
       this.processorNode.connect(this.audioContext.destination);
     } catch (err) {
+      conversationDebug("audio_recorder.start.failed", { error: String(err) });
       console.error("AudioRecorder failed to start microphone capture:", err);
       this.stop();
       throw err;
@@ -65,14 +99,20 @@ export class AudioRecorder {
   }
 
   pause(): void {
+    conversationDebug("audio_recorder.pause", { capturedFrameCount: this.capturedFrameCount });
     this.isPaused = true;
   }
 
   resume(): void {
+    conversationDebug("audio_recorder.resume", { capturedFrameCount: this.capturedFrameCount });
     this.isPaused = false;
   }
 
   stop(): void {
+    conversationDebug("audio_recorder.stop", {
+      hadAudioContext: this.audioContext !== null,
+      capturedFrameCount: this.capturedFrameCount,
+    });
     if (this.processorNode) {
       this.processorNode.disconnect();
       this.processorNode = null;
@@ -91,6 +131,7 @@ export class AudioRecorder {
     }
     this.socketSend = null;
     this.isPaused = false;
+    this.capturedFrameCount = 0;
   }
 
   private downsampleAndConvert(

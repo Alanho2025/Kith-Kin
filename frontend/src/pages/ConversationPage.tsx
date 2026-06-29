@@ -6,6 +6,7 @@ import { StatusBar } from "../components/StatusBar";
 import { TwoLayerSubtitle } from "../components/TwoLayerSubtitle";
 import { useCardConfirmation } from "../features/conversation/hooks/useCardConfirmation";
 import { useLiveConversation } from "../features/conversation/hooks/useLiveConversation";
+import { conversationDebug, summarizeState } from "../features/conversation/debugLog";
 import type { ConversationRuntime } from "../features/conversation/runtime/ConversationRuntime";
 import type {
   ConversationTurnView,
@@ -165,7 +166,12 @@ export function ConversationPage({
 
   const [isActionLocked, setIsActionLocked] = useState(false);
 
+  useEffect(() => {
+    conversationDebug("page.state.rendered", summarizeState(state));
+  }, [state]);
+
   const handleConfirm = async () => {
+    conversationDebug("page.confirm.click", { confirmation: state.confirmation });
     setIsActionLocked(true);
     try {
       await confirm();
@@ -175,6 +181,7 @@ export function ConversationPage({
   };
 
   const handleCancel = async () => {
+    conversationDebug("page.cancel.click", { confirmation: state.confirmation });
     setIsActionLocked(true);
     try {
       await cancel();
@@ -184,6 +191,7 @@ export function ConversationPage({
   };
 
   const handleSelfSpeak = () => {
+    conversationDebug("page.self_speak.click", { confirmation: state.confirmation });
     setIsActionLocked(true);
     try {
       selfSpeak();
@@ -195,6 +203,7 @@ export function ConversationPage({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
+        conversationDebug("page.visibility.restore_microphone", { activeMicMode });
         setRuntimeMicrophoneMode(activeMicMode);
       }
     };
@@ -205,6 +214,7 @@ export function ConversationPage({
   }, [activeMicMode, setRuntimeMicrophoneMode]);
 
   const dispatchControl = (command: RuntimeCommandView) => {
+    conversationDebug("page.control.command", command);
     if (command.eventType === "control.please_wait" || command.eventType === "session.end") {
       setActiveMicMode(null);
       setRuntimeMicrophoneMode(null);
@@ -212,21 +222,34 @@ export function ConversationPage({
     void sendCommand(command);
   };
   const selfSpeak = () => {
+    conversationDebug("page.self_speak.command");
     setActiveMicMode(null);
     setRuntimeMicrophoneMode(null);
     dismissConfirmation();
     void sendCommand({ eventType: "control.self_speak", payload: {} });
   };
   const setMicrophoneMode = (mode: ActiveMicMode) => {
+    conversationDebug("page.microphone.mode", { mode });
     setActiveMicMode(mode);
     setRuntimeMicrophoneMode(mode);
   };
   const togglePharmacistMic = () => {
+    conversationDebug("page.pharmacist_mic.toggle", {
+      previousMode: activeMicMode,
+      nextMode: activeMicMode === "pharmacist" ? null : "pharmacist",
+    });
     setMicrophoneMode(activeMicMode === "pharmacist" ? null : "pharmacist");
   };
-  const startParentMic = () => setMicrophoneMode("parent");
-  const stopParentMic = () => setMicrophoneMode(null);
+  const startParentMic = () => {
+    conversationDebug("page.parent_mic.start");
+    setMicrophoneMode("parent");
+  };
+  const stopParentMic = () => {
+    conversationDebug("page.parent_mic.stop");
+    setMicrophoneMode(null);
+  };
   const triggerRepeat = () => {
+    conversationDebug("page.repeat.click");
     void sendCommand({
       eventType: "control.repeat",
       payload: { target: "last_translation" },
@@ -236,6 +259,10 @@ export function ConversationPage({
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+    conversationDebug("page.typed_pharmacist.submit", {
+      text: inputText.trim(),
+      activeMicMode,
+    });
     setActiveMicMode(null);
     setRuntimeMicrophoneMode(null);
     void sendCommand({

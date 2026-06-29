@@ -19,6 +19,7 @@ from app.adapters.provider_schemas import (
     ProviderTranscriptEvent,
 )
 from app.core.config import Settings
+from app.core.conversation_debug import conversation_log
 from app.core.errors import ProviderUnavailableError
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ class GeminiLiveSessionPort(LiveSessionPort):
         if self._closed:
             return
         try:
+            conversation_log("gemini_live.send_audio", byte_length=len(frame))
             from google.genai import types
 
             await self._session.send_realtime_input(
@@ -56,6 +58,11 @@ class GeminiLiveSessionPort(LiveSessionPort):
             )
         except Exception as e:
             logger.warning(f"Error sending audio frame to Gemini Live: {e}")
+            conversation_log(
+                "gemini_live.send_audio.failed",
+                byte_length=len(frame),
+                error=type(e).__name__,
+            )
             if not self._closed:
                 await self._queue.put(
                     ProviderErrorEvent(
@@ -69,16 +76,24 @@ class GeminiLiveSessionPort(LiveSessionPort):
     async def send_text(self, text: str) -> None:
         """Send English response text to be voiced in the Live Translate session."""
         if self._closed:
+            conversation_log("gemini_live.send_text.skipped_closed", spoken_text=text)
             return
         try:
+            conversation_log("gemini_live.send_text.start", spoken_text=text)
             from google.genai import types
 
             await self._session.send_client_content(
                 turns=types.Content(role="user", parts=[types.Part(text=text)]),
                 turn_complete=True,
             )
+            conversation_log("gemini_live.send_text.ok", spoken_text=text)
         except Exception as e:
             logger.warning(f"Error sending text content to Gemini Live: {e}")
+            conversation_log(
+                "gemini_live.send_text.failed",
+                spoken_text=text,
+                error=type(e).__name__,
+            )
 
     def events(self) -> AsyncIterator[ProviderLiveEvent]:
         async def event_generator() -> AsyncIterator[ProviderLiveEvent]:
@@ -162,6 +177,10 @@ class GeminiLiveSessionPort(LiveSessionPort):
     async def _process_message(self, msg: Any) -> None:
         # 1. Check for tool calls
         if msg.tool_call and msg.tool_call.function_calls:
+            conversation_log(
+                "gemini_live.provider.tool_call",
+                call_count=len(msg.tool_call.function_calls),
+            )
             for call in msg.tool_call.function_calls:
                 tool_event = ProviderToolCallEvent(
                     event_type=ProviderLiveEventType.TOOL_CALL,
@@ -175,11 +194,23 @@ class GeminiLiveSessionPort(LiveSessionPort):
         # 2. Check for server content (transcriptions and audio)
         if msg.server_content:
             content = msg.server_content
+            conversation_log(
+                "gemini_live.provider.server_content",
+                has_input_transcription=bool(content.input_transcription),
+                has_model_turn=bool(content.model_turn),
+                turn_complete=bool(content.turn_complete),
+            )
 
             # English input transcript for whichever speaker the runtime selected.
             if content.input_transcription:
                 text = content.input_transcription.text or ""
                 finished = bool(content.input_transcription.finished)
+                conversation_log(
+                    "gemini_live.provider.input_transcription",
+                    final=finished,
+                    speaker=self._input_speaker(),
+                    text=text,
+                )
                 accumulated_text = _merge_transcript_text(self._current_transcript_text, text)
                 self._current_transcript_text = accumulated_text
                 flat_msg = {
@@ -206,10 +237,17 @@ class GeminiLiveSessionPort(LiveSessionPort):
 
             # Chinese generated audio
             if content.model_turn and content.model_turn.parts:
+                audio_part_count = 0
+                text_part_count = 0
                 for part in content.model_turn.parts:
                     if part.inline_data:
                         audio_data = part.inline_data.data
                         if audio_data:
+                            audio_part_count += 1
+                            conversation_log(
+                                "gemini_live.provider.audio_part",
+                                byte_length=len(audio_data),
+                            )
                             encoded = base64.b64encode(audio_data).decode("utf-8")
                             flat_msg = {
                                 "type": "audio",
@@ -218,7 +256,17 @@ class GeminiLiveSessionPort(LiveSessionPort):
                             }
                             audio_event = GeminiLiveAdapter.map_provider_message(flat_msg)
                             await self._queue.put(audio_event)
+                    elif getattr(part, "text", None):
+                        text_part_count += 1
+                        conversation_log("gemini_live.provider.text_part", text=part.text)
+                conversation_log(
+                    "gemini_live.provider.model_turn.parts",
+                    part_count=len(content.model_turn.parts),
+                    audio_part_count=audio_part_count,
+                    text_part_count=text_part_count,
+                )
             if content.turn_complete:
+                conversation_log("gemini_live.provider.turn_complete")
                 flat_msg = {
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
@@ -281,12 +329,23 @@ class GeminiLiveAdapter(GeminiLiveGateway):
             model_name = (
                 self._settings.gemini_live_translate_model or "gemini-3.5-live-translate-preview"
             )
+            conversation_log(
+                "gemini_live.open_session.start",
+                model=model_name,
+                response_modalities=("AUDIO",),
+                has_current_speaker=context.current_speaker is not None,
+            )
             ctx = client.aio.live.connect(model=model_name, config=config)
             session = await ctx.__aenter__()
 
+            conversation_log("gemini_live.open_session.ok", model=model_name)
             return GeminiLiveSessionPort(ctx, session, context.current_speaker)
         except Exception as e:
             logger.exception("Failed to connect to Gemini Live session")
+            conversation_log(
+                "gemini_live.open_session.failed",
+                error=type(e).__name__,
+            )
             raise ProviderUnavailableError(f"LIVE_UNAVAILABLE: {e}") from e
 
     @staticmethod

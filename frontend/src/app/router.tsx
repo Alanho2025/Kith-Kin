@@ -5,6 +5,7 @@ import { StartPage } from "../pages/StartPage";
 import { MockConversationRuntime } from "../features/conversation/runtime/MockConversationRuntime";
 import { BackendConversationRuntime } from "../features/conversation/runtime/BackendConversationRuntime";
 import { mockPharmacyFlow } from "../test/fixtures/mock-pharmacy-flow";
+import { conversationDebug } from "../features/conversation/debugLog";
 
 interface SessionResponse {
   session_id: string;
@@ -28,12 +29,14 @@ export function AppRouter() {
   const [realSessionId, setRealSessionId] = useState<string>("");
 
   async function handleStart() {
+    conversationDebug("app.start", { mode: isMock ? "mock" : "backend" });
     if (isMock) {
       setStarted(true);
       return;
     }
     try {
       const base = import.meta.env.VITE_API_BASE_URL ?? "/api";
+      conversationDebug("app.session.create.request", { base });
       const res = await fetch(`${base}/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -41,9 +44,14 @@ export function AppRouter() {
       });
       const body: unknown = await res.json();
       const data = parseSessionResponse(body);
+      conversationDebug("app.session.create.ok", {
+        status: res.status,
+        sessionId: data.session_id,
+      });
       setRealSessionId(data.session_id);
       setStarted(true);
-    } catch {
+    } catch (error) {
+      conversationDebug("app.session.create.failed", { error: String(error) });
       setRealSessionId("fallback-session");
       setStarted(true);
     }
@@ -51,8 +59,10 @@ export function AppRouter() {
 
   const runtime = useMemo(() => {
     if (isMock) {
+      conversationDebug("app.runtime.create", { mode: "mock" });
       return new MockConversationRuntime(mockPharmacyFlow, 1500);
     } else {
+      conversationDebug("app.runtime.create", { mode: "backend" });
       return new BackendConversationRuntime();
     }
   }, [isMock]);
@@ -70,7 +80,10 @@ export function AppRouter() {
         void handleStart();
       }}
       isMock={isMock}
-      onToggleMock={(val) => setIsMock(val)}
+      onToggleMock={(val) => {
+        conversationDebug("app.mode.toggle", { isMock: val });
+        setIsMock(val);
+      }}
     />
   );
 }
