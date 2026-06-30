@@ -88,6 +88,8 @@ export default defineConfig({
         GEMINI_API_KEY: googleApiKey ?? "",
         LIVE_TRANSPORT: backendMode === "live_gemini" ? "gemini_live" : "backend_proxy",
         DATABASE_URL: liveDatabaseUrl,
+        APP_WS_TOKEN_SECRET:
+          process.env.APP_WS_TOKEN_SECRET ?? "playwright-test-ticket-secret",
       },
       port: 8000,
       reuseExistingServer,
