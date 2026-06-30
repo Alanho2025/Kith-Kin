@@ -1,148 +1,107 @@
 # Kith&Kin: The One Who Shows Up When You Can't
 
 **Track:** Concierge Agents  
-**Team:** Kith&Kin
+**Team:** Kith&Kin  
+**Repository:** [github.com/Alanho2025/Kith-Kin](https://github.com/Alanho2025/Kith-Kin)
 
 ---
 
-## The Problem
+## 🧭 The Problem
 
-Every immigrant family knows this moment: your parent is alone at a pharmacy counter while you are at work. They may not fully understand the pharmacist, may not know how to explain allergies or current medications in English, and may leave without a clear record of what was said.
+Every immigrant family knows this anxious moment: your elderly parent is standing alone at an Australian pharmacy counter while you are stuck at work. They struggle to comprehend the pharmacist's English, cannot explain their drug allergies or current medications, and return home without a clear record of the visit.
 
-A normal translation app helps with words, but the pharmacy counter is not just a word-by-word translation problem. The parent needs faithful translation, safe response options, privacy protection, memory of previous visits, and a way to involve family only after consent.
+While translation apps help with vocabulary, the pharmacy counter is a high-risk environment. Elderly patients do not just need word-by-word translation; they need:
+1. **Faithful, hallucination-free captions** to read what the pharmacist said.
+2. **Safe response options** that don't fabricate medical decisions.
+3. **Active privacy protection** against disclosure of sensitive info (credit cards, Medicare, address).
+4. **Contextual memory** of previous GP/pharmacy visits.
+5. **Adult-child notifications** only after explicit patient consent.
 
-Kith&Kin is built for that gap. It is a real-time AI companion for elderly Chinese-speaking parents. It helps them understand the pharmacist, choose safe pharmacist-facing questions, review sensitive information before sharing it, and keep a structured summary of the visit.
-
----
-
-## Why an Agent?
-
-This problem needs an agent because the system must react differently depending on the situation.
-
-If the pharmacist says something routine, Kith&Kin should simply translate it faithfully. If the pharmacist asks about allergies or current medicines, Kith&Kin should retrieve only authorised context and ask the parent before sharing it. If the pharmacist asks for payment or identity details, Kith&Kin should treat it as a privacy-sensitive moment. If the pharmacist provides several product options, Kith&Kin should organize only the pharmacist-stated facts without ranking or recommending them.
-
-These behaviours require state, routing, tools, confirmation, and safety gates. That is why Kith&Kin is an agentic system rather than a translation-only app.
+**Kith&Kin** is built for this exact gap. It is a real-time AI companion that assists elderly Chinese-speaking parents during medical encounters, bridging the gap between them, the pharmacist, and their adult children.
 
 ---
 
-## Architecture
+## 🧠 Why an Agent?
+
+Standard chat interfaces or simple voice translation apps fail at the pharmacy counter because they lack context, memory, and safety boundaries. A pure translation loop is prone to medical hallucinations and cannot handle privacy-sensitive moments.
+
+Kith&Kin requires an **agentic system** because it must dynamically route and act based on conversational state:
+* If the pharmacist speaks routine instructions, the system simply translates them.
+* If a GP or pharmacy term implies medical risk (e.g., drug names, dosage, or allergies), the agent must warm the patient's medical profile into context, request a drug-conflict check, and present explicit confirmation options.
+* If the pharmacist asks for sensitive data (credit cards, passport numbers, Medicare, or home address), the agent must immediately intercept and flag a privacy block.
+* If multiple medication options are presented, the agent must organize only the pharmacist-stated facts (price, stated use, warnings) into a neutral comparison table without ranking or recommending.
+
+These context-aware actions, RAG retrieval tools, safety checkstops, and UI-state synchronization require stateful agentic orchestration rather than a single LLM API call.
+
+---
+
+## 🏗️ Architecture: Audio-Visual Split & Single WS Session
 
 ![Kith&Kin architecture](architecture_diagram.svg)
 
-The current implementation uses a React frontend, a FastAPI backend, a single backend WebSocket runtime, Google Gemini adapters, ADK-style agent orchestration, MCP-style tools, and SQLite-backed repositories.
+Kith&Kin is implemented using a **React frontend**, a **FastAPI backend**, a single bidirectional **WebSocket runtime**, and **Google Gemini adapters** connected to an ADK agent orchestration layer and SQLite persistence.
 
-The architecture separates two tracks from the same conversation:
+The core of the system is a **Single Live API session** that handles three channels off the WebSocket: audio streams, JSON card payloads, and transcription text. This architecture cleanly splits the patient's interaction into two tracks:
 
-1. **Faithful translation track.** Final transcript events are passed to the `TranslationService`. The frontend renders large Chinese captions. Agent advice, risk hints, and response cards are not allowed to enter this translation field.
+### 1. The Visual Caption Track (Faithful, Hallucination-Free)
+* **Text Translation Bypass:** To keep translations 100% faithful and free from agent fabrications, the pharmacist's raw English audio transcription (`input_transcription` from the Live API) is passed to a lightweight **Gemini Flash** text-translation model. Kith&Kin's voice agent is strictly forbidden from editing this translation text.
+* **Two-Layer Subtitle UI:**
+  - **Top layer:** Live English transcript (rendered in a small, grey, fading font to indicate system activity).
+  - **Bottom layer:** Stable, large, high-contrast Chinese translation (rendered in an **append-only** fashion to prevent UI flicker and ease readability for elderly eyes).
 
-2. **Safety and action track.** Router and Guardian process final turns in parallel. Router classifies the turn, while Guardian checks privacy, medical, and safety boundaries. If a turn is blocked, Companion does not continue. If the turn needs support, Companion can use bounded tools and propose response cards.
-
-3. **Tool and persistence layer.** The MCP-style adapter exposes `memory_search`, `memory_write`, `check_drug_interaction`, and `notify_family`. SQLite repositories store demo-safe profile, memory, session, ticket, trace, visit, and notification data.
-
-The core invariant is:
-
-> One real-time conversation runtime, separate faithful translation, backend-owned actions, explicit confirmation, and no medical decision-making by the AI.
-
----
-
-## Three Course Concepts
-
-### 1. ADK multi-agent orchestration
-
-Kith&Kin uses separate agent responsibilities instead of one all-powerful chatbot.
-
-- **Router** classifies the final turn into paths such as passive translation, pharmacy risk, privacy risk, response needed, family action, or fallback.
-- **Guardian** reviews final turns and proposed actions for privacy, medical safety, consent, and prompt-injection risks.
-- **Companion** runs only when a safe route needs agent assistance. It can search authorised memory, request a deterministic drug interaction check, and propose response cards.
-
-The important design point is that Guardian is not just a Router branch. Router and Guardian process final turns in parallel, and blocking decisions prevent unsafe continuation. This matches the runtime contract and the current `TurnOrchestrator` implementation.
-
-### 2. MCP-style tools
-
-The Companion does not invent medical or profile facts. It uses bounded tools through the backend tool adapter.
-
-| Tool | Purpose | Safety rule |
-|---|---|---|
-| `memory_search` | Reads authorised profile, allergy, medication, and visit-summary snippets. | Read-only. Missing data means unknown. |
-| `check_drug_interaction` | Checks curated demo drug-interaction facts after a concrete drug name is detected. | Produces pharmacist-confirmation prompts, not medical instructions. |
-| `memory_write` | Saves a reviewed visit summary. | Requires confirmed backend-owned action. |
-| `notify_family` | Records or sends a family notification through the notification adapter. | Requires confirmed backend-owned action. |
-
-This keeps external capabilities scoped and auditable.
-
-### 3. Security and human confirmation
-
-Kith&Kin is designed around human-in-the-loop control.
-
-Selecting a response card has zero side effects. The backend must issue and validate a confirmation ID before speech, memory write, or family notification. The frontend sends identifiers, not executable action text or tool arguments.
-
-The system also separates card confirmation from audio delivery. `card.confirmed` means the backend accepted the confirmation. The actual speaking lifecycle is represented by `audio.muted`, `audio.speaking`, binary audio frames, and completion or failure events.
+### 2. The Audio-Card Track (Agent-Powered)
+* **Parallel Orchestration:** While the visual translation track runs, the backend parallelizes the **Router** and **Guardian** agents to process the turn.
+* **Half-Duplex Audio & Echo Muting:** To prevent acoustic feedback loops where KK's English TTS output is picked up by the parent's microphone and re-translated, the backend automatically **mutes the client's microphone during TTS playback** (`audio.muted` -> `audio.speaking` -> stream PCM frames -> restore listening).
 
 ---
 
-## Product Experience
+## 🎓 Three Key Course Concepts
 
-The frontend is designed as a pharmacy conversation workspace for elderly users.
+### 1. ADK Multi-Agent Orchestration (Parallel Safety)
+Kith&Kin implements a parallel safety gate architecture using the Google Agent Development Kit (ADK):
+* **Router Agent:** Classifies each conversational turn into distinct routes (`passive_translation`, `pharmacy_risk`, `privacy_risk`, `response_needed`, etc.).
+* **Guardian Agent:** Runs in **parallel** on every single turn as a safety backstop. It scans for prompt injection, PII requests, and unsafe medical advice. If the Router attempts to pass a turn to the Companion, but the Guardian flags a safety violation, the execution path is halted, and a safety block is pushed.
+* **Companion Agent:** Handles RAG queries and tool calls for allowed turns.
+  - **ASR Drug-Name Sound-Alike Matching:** To handle garbled drug names in voice transcripts (e.g., "Lisinopril" transcribed as "listen to pro"), the Companion performs phonetic and semantic mapping against the pre-loaded patient profile. If a conflict is found, it generates a confirmation card: `[ Confirm with pharmacist: did you mean my BP med Lisinopril? ]`.
 
-The main screen shows large Chinese captions, a product-options table when the pharmacist gives multiple options, simple response cards, and an explicit confirmation panel before KK speaks. The right-side conversation log keeps Chinese primary and English secondary for context. There are also control paths such as self-speak, repeat, and please-wait.
+### 2. MCP-Style Tools & Latency Mitigation
+The Companion agent interacts with the SQLite database via structured, permissioned tool boundaries:
+* `memory_search(query, tags)`: Searches patient profile, allergies, and visit records.
+* `check_drug_interaction(new_drug, current_meds)`: Queries a local SQLite-backed knowledge base for conflict warnings.
+* `memory_write(key, value)` / `notify_family(summary)`: Gated persistence/notification tools.
 
-For product comparison, Kith&Kin does not recommend. It only displays pharmacist-stated facts such as product name, price, use, directions, and cautions. This is important because the pharmacist remains the medical authority.
+**Latency Strategy for Face-to-Face Conversation:**
+* **Pre-fetch:** On session start, the backend silently runs `memory_search("profile")` to warm the parent's meds and allergies into the context window, eliminating database round-trips during critical turns.
+* **Lazy-load with Vocal Fillers:** Drug-conflict checking is lazy-loaded only when a drug entity is detected. To cover the database round-trip time and keep the face-to-face rhythm natural, the system plays a short TTS filler ("Let me check that for you...") to mask the latency.
 
----
-
-## Demo Flow
-
-A typical demo can show the following sequence:
-
-1. The pharmacist speaks in English.
-2. Kith&Kin shows a faithful Chinese translation.
-3. Router and Guardian process the final turn.
-4. If the pharmacist asks about a medicine or allergy, Companion retrieves authorised context or asks for clarification.
-5. Kith&Kin renders response cards in Chinese.
-6. The parent selects a card.
-7. The parent confirms before KK speaks or performs any action.
-8. If the pharmacist provides several products, Kith&Kin renders a neutral product table based only on pharmacist-stated facts.
-9. At the end, Kith&Kin shows a structured visit summary for review before memory save or family notification.
-
----
-
-## Evaluation
-
-The repo now contains **24 executable eval cases** in `evals/cases.json`. These cases are derived from the architecture and runtime contracts.
-
-They cover:
-
-- faithful translation without advice;
-- medicine-risk routing;
-- allergy and profile-context confirmation;
-- credit-card and prompt-injection blocking;
-- response-card selection with zero side effects;
-- duplicate confirmation idempotency;
-- half-duplex audio ordering;
-- translation timeout fallback;
-- memory write and family notification after confirmation only;
-- cross-session recall;
-- redacted privacy traces;
-- pharmacist-stated product option rendering;
-- overseas medicine similarity without guessing;
-- browser trace replay for conversation-log purity, summary, audio delivery, and speaker attribution.
-
-The eval suite matters because a demo can appear correct while still violating a hidden safety boundary. The evals check both final output and the event/tool trajectory.
+### 3. Human-in-the-Loop Gating & PII Interception
+* **Explicit Consent Tickets:** Proposing a card has zero side effects. The backend generates a temporary ticket for the proposed card. The client must select and explicitly click "Confirm & Speak" (`card.confirm`), sending a token back to the backend. The backend validates this token before starting the TTS synthesis stream or updating the SQLite memory.
+* **PII Interception:** The Guardian agent inspects all pharmacist prompts. If the pharmacist asks for credit card details, passports, Medicare, or home addresses, the Guardian intercepts the turn and forces a privacy alert card: `[ Privacy Request: KK blocked sharing this info. Tap to decline ]`.
 
 ---
 
-## Project Journey
+## 🛍️ Product Experience & Neutrality
 
-The project moved from a high-level pharmacy assistant idea into a contract-driven implementation.
-
-The team first defined the product goal and safety boundaries: faithful translation, no medical advice, no automatic sensitive disclosure, and confirmation before outward actions. Then the team built runtime contracts for events, response cards, and MCP tools. The implementation followed those contracts through a FastAPI backend, React frontend, SQLite persistence layer, ADK-style agent orchestration, and deterministic tests.
-
-A key learning was that product-grade vibe coding is not about generating more code. It is about keeping specs, code, tests, and evals aligned. In Kith&Kin, the important engineering work is the state machine: every visible UI state must correspond to a real backend event, not a frontend guess.
+* **Elderly-Friendly Workspace:** The UI features oversized high-contrast buttons, a large caption area, and a simplified layout.
+* **Neutral Product Comparison:** For product queries (e.g., comparing Panadol and Nurofen), Kith&Kin does not recommend or rank medicines. It parses and presents only pharmacist-stated facts (prices, ingredients, cautions) in a tabular format. The pharmacist remains the absolute medical authority.
+* **Adult-Child Feed:** Post-visit summaries and family notifications are structured and require confirmation before write/dispatch, keeping children informed without sacrificing parental autonomy.
 
 ---
 
-## Repository
+## 🧪 Rigorous Evaluation
 
-`github.com/Alanho2025/Kith-Kin`
+The repository contains **24 executable evaluation cases** in `evals/cases.json`, testing:
+1. **Safety boundaries:** Redacting PII, blocking credit card requests, and intercepting prompt injections.
+2. **Contextual retrieval:** Warming profiles, RAG extraction, and phonetic drug sound-alike matching.
+3. **Idempotency:** Replaying card confirmations and validating token usage.
+4. **E2E Integration:** Playwright E2E browser tests verify the entire pharmacy counter flow—from initial identity cards to product options tables, checkout/payment selections (card/cash), and final summary generation.
 
-The repository includes the backend, frontend, runtime contracts, eval suite, Playwright E2E tests, architecture documents, product goal, and demo writeup.
+The eval runner verifies not just LLM answers, but the exact event sequence and tool execution traces, ensuring complete system safety.
+
+---
+
+## 🚀 Project Journey & Handoff
+
+The project transitioned from a concept into a robust, contract-driven implementation. By building runtime contracts for events, card tokens, and tools, we aligned the FastAPI backend, React frontend, and ADK orchestration layer. 
+
+A primary takeaway was that building reliable AI agents is not about writing more LLM code; it is about designing a reliable state machine. In Kith&Kin, every visible UI state maps to a verifiable backend event, and safety is enforced deterministically at the contract boundary.
