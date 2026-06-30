@@ -91,6 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BACKEND_MODE: deterministic
+      APP_WS_TOKEN_SECRET: ${{ secrets.APP_WS_TOKEN_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -125,11 +126,15 @@ jobs:
   # ---------- Real Gemini Evaluation Gates: scheduled / main / manual observability ----------
   live-eval:
     name: Live Gemini API Evaluation Gates
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     env:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      APP_WS_TOKEN_SECRET: ${{ secrets.APP_WS_TOKEN_SECRET }}
       PLAYWRIGHT_BACKEND_MODE: live_gemini
+      GEMINI_LIVE_MODEL: gemini-2.5-flash-native-audio-preview-12-2025
+      GEMINI_TEXT_MODEL: gemini-2.5-flash
+      GEMINI_LIVE_TRANSLATE_MODEL: gemini-2.5-flash-native-audio-preview-12-2025
+      LIVE_TRANSLATION_FALLBACK_ENABLED: false
     steps:
       - uses: actions/checkout@v4
 
