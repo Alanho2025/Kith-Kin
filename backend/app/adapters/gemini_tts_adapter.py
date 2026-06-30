@@ -31,6 +31,13 @@ class GeminiTextToSpeechAdapter(TextToSpeechGateway):
             raise ProviderUnavailableError("TTS_TEXT_TOO_LONG")
         key_val = self._settings.google_api_key.get_secret_value()
         if not key_val:
+            if self._settings.environment in ("development", "test"):
+                # Return dummy PCM audio for deterministic/offline testing
+                return SynthesizedSpeech(
+                    audio=b"\x00" * 48000,  # 1 second of silence at 24kHz 16-bit mono
+                    mime_type=TARGET_MIME_TYPE,
+                    sample_rate_hz=TARGET_SAMPLE_RATE_HZ,
+                )
             raise ProviderUnavailableError("TTS_UNAVAILABLE")
 
         conversation_log(

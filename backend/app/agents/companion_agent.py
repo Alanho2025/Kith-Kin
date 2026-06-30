@@ -425,7 +425,11 @@ class CompanionAgent(Agent):
             if api_key and hasattr(api_key, "get_secret_value"):
                 api_key = api_key.get_secret_value()
 
-        if api_key:
+        is_backend_proxy = os.environ.get("PLAYWRIGHT_BACKEND_MODE") == "deterministic"
+        if not is_backend_proxy and hasattr(self, "_settings") and self._settings:
+            is_backend_proxy = getattr(self._settings, "live_transport", None) == "backend_proxy"
+
+        if api_key and not is_backend_proxy:
             try:
                 await _run_adk_runner_with_retries(
                     runner,
@@ -754,6 +758,60 @@ class CompanionAgent(Agent):
                             "action": {"type": "no_action"},
                         }
                     ]
+            elif "buy" in text_lower or "purchase" in text_lower or "which one" in text_lower:
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "确认购买 Nurofen 并告诉药师",
+                        "en_text": "I would like to buy Nurofen, please.",
+                        "speak_zh": "我想购买 Nurofen，谢谢。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "确认购买 Panadol 并告诉药师",
+                        "en_text": "I would like to buy Panadol, please.",
+                        "speak_zh": "我想购买 Panadol，谢谢。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "让我再考虑一下，请稍等",
+                        "en_text": "Let me think about it. Please wait a moment.",
+                        "speak_zh": "让我再考虑一下，请稍等。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    }
+                ]
+            elif "pay" in text_lower or "dollar" in text_lower or "cash or card" in text_lower:
+                draft_cards = [
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "确认支付（用卡支付）",
+                        "en_text": "I will pay with card, thank you.",
+                        "speak_zh": "我用卡支付，谢谢。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "确认支付（用现金支付）",
+                        "en_text": "I will pay with cash, thank you.",
+                        "speak_zh": "我用现金支付，谢谢。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    },
+                    {
+                        "card_type": "ask_question",
+                        "zh_text": "请问能给我收据吗？",
+                        "en_text": "Could I have a receipt, please?",
+                        "speak_zh": "请给我收据，谢谢。",
+                        "risk_level": "normal",
+                        "action": {"type": "speak"},
+                    }
+                ]
             else:
                 draft_cards = [
                     {

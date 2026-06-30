@@ -369,6 +369,19 @@ class TurnOrchestrator:
         user_id = str(context.user_id)
         session_id = str(event.session_id)
 
+        if self._settings and getattr(self._settings, "live_transport", None) == "backend_proxy":
+            proposal = await self._companion.propose_cards(
+                event,
+                route,
+                guardian.guardian_decision_id,
+                mcp_adapter,
+            )
+            card_review = await self._guardian.review_cards(proposal.card_set)
+            if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
+                proposal = approve_card_proposal(proposal, card_review)
+                self._cards.register_card_set(proposal.card_set, context)
+            return TurnOutcome(route, guardian, proposal, card_review)
+
         # Initialize the session
         session = await session_service.get_session(
             app_name="agents", user_id=user_id, session_id=session_id

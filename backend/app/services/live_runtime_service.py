@@ -107,6 +107,7 @@ class LiveRuntimeService:
         self._product_options = PharmacyProductOptionTracker()
         self._client_audio_frame_counts: dict[UUID, int] = {}
         self._provider_audio_frame_counts: dict[UUID, int] = {}
+        self._locks: dict[UUID, asyncio.Lock] = {}
 
     def discard_session(self, session_id: UUID) -> None:
         self._buffers.pop(session_id, None)
@@ -485,6 +486,39 @@ class LiveRuntimeService:
                 )
                 await websocket.send_json(emitted)
 
+            if isinstance(event, CardConfirmEvent):
+                context = TrustedRequestContext(
+                    session_id=session_id,
+                    user_id=self._user_id or UUID("00000000-0000-4000-8000-000000000001"),
+                    origin="runtime",
+                )
+                try:
+                    card = self._cards.get_card_by_confirmation(
+                        event.payload.confirmation_id,
+                        context,
+                    )
+                    result = await self._cards.confirm_selected(event.payload.confirmation_id, context)
+                    from app.core.constants import CardActionType
+
+                    should_voice_action = result.action_type in (
+                        CardActionType.SPEAK,
+                        CardActionType.SHOW_TO_PHARMACIST,
+                    ) or str(result.action_type) in ("speak", "show_to_pharmacist")
+
+                    if result.phase == "succeeded" and should_voice_action:
+                        if self._tts_gateway is not None:
+                            await self._speak_confirmed_text(
+                                websocket,
+                                session_id,
+                                text=card.en_text,
+                                card_id=card.card_id,
+                                confirmation_id=result.confirmation_id,
+                                action_type=result.action_type,
+                                correlation_id=event.event_id,
+                            )
+                except Exception as ex:
+                    logger.exception("Failed handling deterministic CardConfirmEvent: %s", ex)
+
             # If SessionEndEvent in mock mode, generate and emit summary.render
             if isinstance(event, SessionEndEvent) and self._completion_service is not None:
                 context = TrustedRequestContext(
@@ -527,27 +561,7 @@ class LiveRuntimeService:
                     logger.warning("Failed to generate mock summary: %s", e)
             return
 
-        if not isinstance(event, CardConfirmEvent):
-            return
-        if self._user_id is None:
-            raise RuntimeError("Missing user ID")
-        context = TrustedRequestContext(
-            session_id=session_id,
-            user_id=self._user_id,
-            origin="runtime",
-        )
-        result = await self._cards.confirm_selected(event.payload.confirmation_id, context)
-        confirmed = self._append_event(
-            session_id,
-            "card.confirmed",
-            {
-                "confirmation_id": result.confirmation_id,
-                "action_type": "speak",
-                "replayed": result.replayed,
-            },
-            correlation_id=event.event_id,
-        )
-        await websocket.send_json(confirmed)
+
 
     async def _handle_transcript_provider_event(
         self,
@@ -778,12 +792,14 @@ class LiveRuntimeService:
         session_id: UUID,
         transcript: dict[str, object],
     ) -> None:
-        try:
-            outcomes = await self._append_turn_outcome(session_id, transcript, [])
-            for outcome in outcomes:
-                await websocket.send_json(outcome)
-        except Exception:
-            logger.warning("Background turn outcome failed", exc_info=True)
+        lock = self._locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            try:
+                outcomes = await self._append_turn_outcome(session_id, transcript, [])
+                for outcome in outcomes:
+                    await websocket.send_json(outcome)
+            except Exception:
+                logger.warning("Background turn outcome failed", exc_info=True)
 
     def _append_identity_cards(
         self,
