@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.constants import PermissionTier, ToolName
+from app.core.conversation_debug import conversation_log, session_ref
 from app.core.errors import IdempotencyConflictError
 from app.domain.credentials import TrustedRequestContext
 from app.domain.rag import RetrievalCategory, RetrievalRequest
@@ -80,9 +81,22 @@ class McpToolAdapter:
         query: str,
         tags: tuple[str, ...],
     ) -> ToolResult[MemorySearchData]:
+        conversation_log(
+            "tool.memory_search.start",
+            session=session_ref(self._context.session_id),
+            origin=self._context.origin,
+            query=query,
+            tags=tags,
+        )
         try:
             request = MemorySearchRequest(query=query, tags=tags)
         except ValidationError:
+            conversation_log(
+                "tool.memory_search.validation_error",
+                session=session_ref(self._context.session_id),
+                query=query,
+                tags=tags,
+            )
             return _error(
                 "TOOL_VALIDATION_ERROR",
                 "Invalid memory search request.",
@@ -100,6 +114,13 @@ class McpToolAdapter:
             ),
         )
         if result is None:
+            conversation_log(
+                "tool.memory_search.timeout",
+                session=session_ref(self._context.session_id),
+                query=request.query,
+                tags=request.tags,
+                timeout_ms=self._settings.rag_timeout_ms,
+            )
             return _error(
                 "TOOL_TIMEOUT",
                 "Memory search timed out.",
@@ -118,6 +139,17 @@ class McpToolAdapter:
             for snippet in result.snippets
         )
         status = ToolStatus.SUCCESS if records else ToolStatus.NO_RESULT
+        conversation_log(
+            "tool.memory_search.result",
+            session=session_ref(self._context.session_id),
+            query=request.query,
+            tags=request.tags,
+            status=status.value,
+            record_count=len(records),
+            record_types=tuple(
+                str(record.value.get("record_type", "unknown")) for record in records
+            ),
+        )
         return ToolResult[MemorySearchData](
             ok=True,
             status=status,
@@ -130,9 +162,22 @@ class McpToolAdapter:
         new_drug: str,
         current_meds: tuple[str, ...],
     ) -> ToolResult[DrugInteractionData]:
+        conversation_log(
+            "tool.drug_interaction.start",
+            session=session_ref(self._context.session_id),
+            origin=self._context.origin,
+            new_drug=new_drug,
+            current_med_count=len(current_meds),
+        )
         try:
             request = DrugInteractionRequest(new_drug=new_drug, current_meds=current_meds)
         except ValidationError:
+            conversation_log(
+                "tool.drug_interaction.validation_error",
+                session=session_ref(self._context.session_id),
+                new_drug=new_drug,
+                current_med_count=len(current_meds),
+            )
             return _error(
                 "TOOL_VALIDATION_ERROR",
                 "Invalid drug interaction request.",
@@ -143,6 +188,13 @@ class McpToolAdapter:
             self._check_db_interaction(request),
         )
         if result is None:
+            conversation_log(
+                "tool.drug_interaction.timeout",
+                session=session_ref(self._context.session_id),
+                new_drug=request.new_drug,
+                current_med_count=len(request.current_meds),
+                timeout_ms=self._settings.drug_check_timeout_ms,
+            )
             return _error(
                 "TOOL_TIMEOUT",
                 "Drug interaction check timed out.",
@@ -150,6 +202,16 @@ class McpToolAdapter:
                 status=ToolStatus.TIMEOUT,
                 retryable=True,
             )
+        conversation_log(
+            "tool.drug_interaction.result",
+            session=session_ref(self._context.session_id),
+            new_drug=request.new_drug,
+            current_med_count=len(request.current_meds),
+            risk_level=result.risk_level.value,
+            reason_code=result.reason_code,
+            matched_current_med_count=len(result.matched_current_meds),
+            source_type=result.source_type,
+        )
         return ToolResult[DrugInteractionData](
             ok=True,
             status=ToolStatus.SUCCESS,

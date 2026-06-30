@@ -101,6 +101,21 @@ class AudioSpeakingEvent(RuntimeEventBase):
     payload: AudioSpeakingPayload
 
 
+class AudioSpeakerChangedPayload(BaseModel):
+    """Client-selected microphone speaker context for subsequent audio frames."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    speaker: Literal["parent", "pharmacist"]
+
+
+class AudioSpeakerChangedEvent(RuntimeEventBase):
+    """Client command announcing who subsequent microphone audio belongs to."""
+
+    event_type: Literal["audio.speaker_changed"]
+    payload: AudioSpeakerChangedPayload
+
+
 class TranscriptPayload(BaseModel):
     """Replaceable partial or immutable final source transcript."""
 
@@ -294,6 +309,9 @@ class VisitSummaryPayload(BaseModel):
     pharmacist_advice_summary_zh: str
     unresolved_questions_zh: tuple[str, ...]
     follow_up_needed: bool
+    pharmacist_stated_advice_zh: str | None = None
+    unresolved_follow_up_questions_zh: tuple[str, ...] = ()
+    confirmed_family_follow_up: bool = False
 
 
 class SummaryRenderPayload(BaseModel):
@@ -489,6 +507,7 @@ RuntimeEvent = (
     | AudioListeningEvent
     | AudioMutedEvent
     | AudioSpeakingEvent
+    | AudioSpeakerChangedEvent
     | TranscriptPartialEvent
     | TranscriptFinalEvent
     | TranslationPendingEvent
@@ -522,6 +541,7 @@ _KNOWN_EVENT_MODELS: dict[str, type[RuntimeEventBase]] = {
     "audio.listening": AudioListeningEvent,
     "audio.muted": AudioMutedEvent,
     "audio.speaking": AudioSpeakingEvent,
+    "audio.speaker_changed": AudioSpeakerChangedEvent,
     "transcript.partial": TranscriptPartialEvent,
     "transcript.final": TranscriptFinalEvent,
     "translation.pending": TranslationPendingEvent,

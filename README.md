@@ -1,222 +1,242 @@
-# Kith&Kin — 替你在场的人
+# Kith&Kin — The one who shows up when you can't
 
-**A real-time AI companion for elderly Chinese-speaking parents navigating Australian pharmacy and GP visits.**
+**Kith&Kin is a real-time AI companion for elderly Chinese-speaking parents who need to communicate safely at an Australian pharmacy counter.**
 
 [![Kaggle Capstone](https://img.shields.io/badge/Kaggle-Concierge%20Agents-20BEFF)](https://kaggle.com/competitions/vibecoding-agents-capstone-project)
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 
 ---
 
-## 📖 The Problem
+## The problem
 
-Every immigrant knows this moment: you're at work, and your parents are alone at the pharmacy counter. They can't understand what the pharmacist says, and they can't explain their medical history. Translation apps help with words — but they don't know about your dad's sulfa allergy, his blood pressure medication, or what the pharmacist recommended last time.
+When an elderly parent visits a pharmacy alone, normal translation is not enough. They may need to understand the pharmacist, explain allergies or current medicines, ask safe follow-up questions, and remember what was said after the visit.
 
-**Kith&Kin is the one who shows up when you can't.**
+Generic translation apps translate words. They do not know whether the moment is a normal translation task, a medicine-risk task, a privacy-risk task, or a consent-gated family-notification task.
 
----
-
-## ✨ Features
-
-Kith&Kin connects to the **Gemini Live API** through a single WebSocket session. It provides two parallel experiences from one audio stream:
-
-| Track | What it does | Who controls it |
-|-------|-------------|-----------------|
-| **Visual Track** | Faithful real-time Chinese translation of the pharmacist's English — oversized text, append-only, never hallucinated. | A lightweight Flash text model (translation sidecar) |
-| **Voice + Card Track** | KK listens for medication risks, searches past visit memory, and offers simple confirmable response cards. | ADK multi-agent orchestration (Router, Companion, Guardian) |
-
-### The Hero Moment
-* **Visit 1:** The pharmacist mentions a new supplement. KK writes this to persistent memory and notifies the adult child.
-* **Visit 2 (days later):** KK opens the new session, recalls the prior advice, and proactively offers a card: *"Last time the pharmacist mentioned Coenzyme Q10 — want to ask about it today?"*
-
-A translation app cannot do this. Only an agent with cross-session memory can.
+Kith&Kin fills that gap. It provides faithful Chinese translation, confirmable response cards, authorised profile recall, neutral pharmacist-stated product comparison, and confirmation-gated memory and family summary flows.
 
 ---
 
-## 🏗️ Architecture
+## What Kith&Kin does
 
+| Capability | Current implementation |
+|---|---|
+| Real-time pharmacy conversation | React + FastAPI over one backend WebSocket, with backend-owned runtime events. |
+| Faithful translation track | Final transcript events are translated by a dedicated translation service and rendered as large Chinese captions. Companion advice never writes into the translation track. |
+| Agent safety track | Router and Guardian process final turns in parallel. Companion runs only for routes that need agent assistance and only after blocking decisions are respected. |
+| Response cards | Backend-owned card sets are rendered in the UI. Selecting a card has no side effect; confirmation is required before speech, memory write, or notification. |
+| Product options | `product.options.render` displays only pharmacist-stated product names, prices, uses, directions, and cautions. It does not rank or recommend products. |
+| Memory and follow-up | Demo SQLite data stores authorised profile facts, medication/allergy context, visit summaries, and notification stubs. |
+| Testing and evals | Backend tests, frontend tests, Playwright E2E, deterministic browser smoke path, and 24 executable eval cases. |
+
+---
+
+## Architecture
+
+![Kith&Kin architecture](docs/architecture_diagram.svg)
+
+The runtime has one audio transport and multiple text-level reasoning paths.
+
+```text
+Parent / Pharmacist
+        ↓
+React client
+        ↓ one backend WebSocket
+FastAPI LiveRuntimeService
+        ↓
+Gemini Live adapter / fake deterministic adapter
+        ↓ final transcript events
+ ┌──────────────────────────────┬──────────────────────────────┐
+ │                              │                              │
+TranslationService              Router + Guardian              Product option extraction
+Faithful Chinese captions       Parallel safety/routing         Neutral pharmacist facts
+ │                              │                              │
+Frontend subtitles              Companion ADK agent             Product table
+                                MCP tools
+                                memory_search / memory_write
+                                check_drug_interaction
+                                notify_family
+                                │
+                                SQLite repositories
 ```
-User/Pharmacist audio → Live API (single WS session)
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ↓                     ↓                     ↓
-  input_transcription    model audio out      function-call / JSON
-  (English text)         (KK's Chinese TTS)    (response cards)
-        ↓                     ↓                     ↓
-  Flash text translate   play through         render oversized
-  → Chinese              speaker              confirm-cards
-        ↓                (mic MUTED while
-  VISUAL TRACK            playing)            VOICE/CARD TRACK
-  (faithful, big text)                       (agent-powered)
-```
 
-### Three Course Concepts Demonstrated
+The key product rule is simple:
 
-1. **ADK Multi-Agent System** — LLM-driven routing:
-   * **Router Agent** — Classifies each turn ("routine translation" vs "needs decision"), pulls up Companion.
-   * **Companion Agent** — Searches memory, calls drug-interaction check, generates confirm-cards. Matches garbled drug names phonetically/semantically.
-   * **Guardian Agent** — Runs on every turn as a parallel safety layer (injection detection, PII interception, consent gating).
-2. **MCP Server** — A standalone stdio process exposing `memory_search`, `memory_write`, `check_drug_interaction`, and `notify_family` tools, connected via ADK's `McpToolset`.
-3. **Security Features** — Ephemeral tokens (API key never reaches the client), injection detection on every turn, PII interception (credit card / Medicare / passport), and consent gating on every response card.
+> Kith&Kin translates faithfully, helps the parent ask the pharmacist safer questions, and never makes medical decisions itself.
 
 ---
 
-## 🚀 Running the Project
+## Core components
+
+### Frontend
+
+- `frontend/src/pages/ConversationPage.tsx` — elderly-friendly pharmacy workspace.
+- `frontend/src/components/ResponseCard.tsx` — confirmable Chinese response cards.
+- `frontend/src/components/TwoLayerSubtitle.tsx` — large Chinese caption display with English context.
+- `frontend/src/features/conversation/reducer.ts` — event-driven UI state machine.
+- `frontend/src/features/conversation/runtime/BackendConversationRuntime.ts` — WebSocket runtime bridge.
+- `frontend/e2e/` — Playwright backend and deterministic E2E tests.
+
+### Backend
+
+- `backend/app/main.py` — FastAPI app composition and dependency wiring.
+- `backend/app/deterministic_main.py` — deterministic backend entrypoint for CI/browser smoke tests without live Gemini credentials.
+- `backend/app/services/live_runtime_service.py` — WebSocket runtime, transcript/translation/card/action event emission.
+- `backend/app/services/turn_orchestrator.py` — parallel Router + Guardian orchestration and gated Companion execution.
+- `backend/app/services/card_service.py` — server-owned card set registration and confirmation lifecycle.
+- `backend/app/services/runtime_command_service.py` — client command handling for card select/confirm/cancel and controls.
+- `backend/app/adapters/mcp_tool_adapter.py` — MCP-style tool boundary for memory, drug interaction, and family notification.
+- `backend/app/repositories/` — SQLite-backed repositories for memory, sessions, tickets, traces, visits, and notifications.
+
+### Specs and evals
+
+- `specs/runtime-event-contract.md` — canonical backend-to-frontend event contract.
+- `specs/response-card-contract.md` — card lifecycle and confirmation rules.
+- `specs/mcp-tool-contracts.md` — MCP tool inputs, outputs, permissions, and failure behavior.
+- `evals/cases.json` — 24 architecture-derived eval cases covering translation, routing, privacy, confirmation, product options, browser trace replay, audio delivery, and speaker attribution.
+
+---
+
+## Safety boundaries
+
+Kith&Kin must not:
+
+- diagnose, prescribe, or recommend a medicine;
+- decide which product is safest or best;
+- infer missing allergies, medicines, doses, or medical history;
+- speak for the parent without explicit confirmation;
+- share sensitive health, identity, payment, or family information without a safe confirmation path;
+- write memory or notify family on card selection alone.
+
+Kith&Kin may:
+
+- faithfully translate pharmacist speech;
+- help the parent ask the pharmacist to confirm medicine names, directions, interactions, or cautions;
+- show authorised profile facts for parent review;
+- organize pharmacist-stated product facts into a neutral table;
+- save visit summaries or notify family only after confirmed backend-owned actions.
+
+---
+
+## Running locally
 
 ### Prerequisites
-* Python 3.10+
-* Node.js 18+
-* A Google API key with Gemini Live API access (set in `backend/.env` or `GOOGLE_API_KEY` env var)
 
-### 1. Environment Setup
+- Python 3.11 or 3.12
+- Node.js 18+
+- Optional: `GOOGLE_API_KEY` in `backend/.env` for live Gemini paths
 
-Copy template environment files to their local locations:
-```bash
-# Copy top-level and directory environment templates
-cp .env.example .env
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-```
-Ensure you set your `GOOGLE_API_KEY` in `backend/.env`.
+### Backend setup
 
-### 2. Backend Setup
-Initialize the Python virtual environment and install backend dependencies:
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+./.venv/bin/pip install -r requirements.txt
+./.venv/bin/alembic upgrade head
+cd ..
+backend/.venv/bin/python -m scripts.seed_demo_data --database-url sqlite+aiosqlite:///backend/kithkin.db
 ```
 
-Run SQLite database migrations and seed demo data (allergies, medication history, and patient profile):
-```bash
-# Run database migrations
-alembic upgrade head
+### Start the backend
 
-# Seed demo data
-python -m scripts.seed_demo_data
-```
+Live-capable FastAPI app:
 
-### 3. Frontend Setup
-Install frontend npm packages:
-```bash
-cd ../frontend
-npm install
-```
-
-### 4. Running Locally
-
-To run the full application locally:
-
-#### Step 4.1: Run the Backend Server
-From the `backend` directory, run the FastAPI application on port 8000:
 ```bash
 cd backend
-source .venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+./.venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
 
-#### Step 4.2: Run the Frontend App
-From the `frontend` directory, start the Vite development server on port 5173:
+Deterministic app for local browser smoke tests:
+
+```bash
+cd backend
+./.venv/bin/python -m uvicorn app.deterministic_main:app --reload --port 8000
+```
+
+### Start the frontend
+
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
-Open `http://localhost:5173` in your browser.
+
+Open `http://localhost:5173`.
 
 ---
 
-## 🧪 Testing and Evals
+## Testing and verification
 
-We maintain comprehensive test suites across the entire stack.
+### Backend tests
 
-### 1. Backend Pytest Suite
-Run backend unit and integration tests (uses SQLite in-memory db and mocks the Gemini Live adapter):
 ```bash
 cd backend
-source .venv/bin/activate
-pytest
+./.venv/bin/python -m pytest -q
 ```
-*To run tests with code coverage:* `pytest --cov=app`
 
-### 2. Frontend Vitest Suite
-Run frontend component and unit tests:
+### Frontend tests
+
 ```bash
 cd frontend
 npm run test
+npm run typecheck
+npm run lint
 ```
-*To run tests in watch mode:* `npm run test:watch`
 
-### 3. Playwright E2E Suite
-Run end-to-end browser tests simulating the 3-turn pharmacy visit (automatically starts frontend Vite and backend Uvicorn servers):
+### Playwright E2E
+
 ```bash
 cd frontend
 npx playwright test
 ```
 
-### 4. Agent Evals
-Run the 15 canonical agent and safety acceptance evals (validating routing, safety boundaries, prompt injection, and tool trajectory):
+### Agent/eval suite
+
 ```bash
-# From the repository root directory
-export GOOGLE_API_KEY=$(grep GOOGLE_API_KEY backend/.env | cut -d '=' -f 2-)
-export GEMINI_API_KEY=$GOOGLE_API_KEY
+# From repository root, after backend setup
+backend/.venv/bin/python -m pytest evals/test_runner.py -q
 backend/.venv/bin/python -m evals.run evals/cases.json
 ```
 
-### 5. Quality & Lint Gates
-Run backend and frontend code quality checks:
-```bash
-# Backend lint check and formatting
-cd backend
-ruff check .
-ruff format --check .
-mypy app
+Live Companion evals require `GOOGLE_API_KEY`:
 
-# Frontend lint check and TypeScript typecheck
-cd frontend
-npm run lint
-npm run typecheck
+```bash
+GOOGLE_API_KEY="your-key" backend/.venv/bin/python -m evals.run evals/cases.json --require-live-companion
 ```
 
 ---
 
-## 📂 Project Structure
+## Project structure
 
 ```text
-kith-and-kin/
+Kith-Kin/
 ├── backend/
 │   ├── app/
-│   │   ├── agents/          # Router, Companion, and Guardian agents
-│   │   ├── adapters/        # Gemini Live API, text models, and MCP adapters
-│   │   ├── api/routes/      # FastAPI endpoints (live connection, cards, health)
-│   │   ├── db/              # SQLAlchemy engine and ORM models
-│   │   ├── repositories/    # Database access repositories (sqlite persistence)
-│   │   ├── services/        # Orchestration, cards confirmation, and commands
-│   │   └── mcp_servers/     # Persistent stdio MCP memory server
+│   │   ├── adapters/        # Gemini, fake runtime, TTS, ticket, MCP adapters
+│   │   ├── agents/          # Router, Guardian, Companion, Orchestrator helpers
+│   │   ├── api/             # FastAPI routes and error handlers
+│   │   ├── db/              # SQLAlchemy engine and ORM setup
+│   │   ├── repositories/    # SQLite persistence boundaries
+│   │   ├── schemas/         # Runtime, card, and agent DTOs
+│   │   └── services/        # Runtime, orchestration, cards, sessions, summaries
 │   └── tests/               # Backend unit and integration tests
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # StartPage, ConversationPage, VisitSummaryPage
-│   │   ├── components/      # UI components (StatusBar, Subtitles, Cards)
-│   │   └── features/        # Conversation state, hooks, and API endpoints
-│   └── e2e/                 # Playwright E2E browser tests
-├── evals/
-│   ├── cases.json           # Canonical acceptance evaluation cases
-│   └── run.py               # Evaluation runner
-├── docs/                    # Architecture, UI/UX, and Clean Code specs
-└── specs/                   # Runtime event and card contract specifications
+│   │   ├── components/      # UI components
+│   │   ├── features/        # Conversation state, mapper, hooks, runtime bridge
+│   │   └── pages/           # Start, conversation, visit summary pages
+│   └── e2e/                 # Playwright browser tests
+├── specs/                   # Runtime, card, and MCP contracts
+├── evals/                   # 24 executable acceptance cases and runners
+├── docs/                    # Architecture, product goal, UI/UX, writeup, diagram
+└── scripts/                 # Demo data and repo hygiene utilities
 ```
 
 ---
 
-## 🏆 Competition
+## Competition
 
-* **Track:** Concierge Agents
-* **Deadline:** July 6, 2026
-* **Submission:** [Kaggle Capstone Project](https://www.kaggle.com/competitions/vibecoding-agents-capstone-project)
-* **Demo Video:** [YouTube — Kith&Kin Demo](https://www.youtube.com/) *(link will be added before deadline)*
-
----
-
-## 📄 License
-
-This project is licensed under CC BY 4.0 — see the [Kaggle competition rules](https://www.kaggle.com/competitions/vibecoding-agents-capstone-project/rules) for details.
+- **Track:** Concierge Agents
+- **Repository:** `github.com/Alanho2025/Kith-Kin`
+- **Submission:** Kaggle Vibe Coding Agents Capstone Project
+- **License:** CC BY 4.0

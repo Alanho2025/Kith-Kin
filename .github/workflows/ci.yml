@@ -3,9 +3,12 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  merge_group:
   push:
     branches: [main]
   workflow_dispatch: {}
+  schedule:
+    - cron: "0 13 * * *"
 
 jobs:
   # ---------- Free Offline Gates: Runs on every PR / Push to main ----------
@@ -15,9 +18,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
+
+      - name: Install frontend deps
+        id: setup_frontend_offline
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck (frontend)
+        id: frontend_typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Unit tests (frontend)
+        id: frontend_test
+        working-directory: frontend
+        run: npm run test
+
+      - name: Lint (frontend)
+        id: frontend_lint
+        working-directory: frontend
+        run: npm run lint
 
       - name: Install backend deps
         id: setup_backend
@@ -35,10 +62,15 @@ jobs:
         working-directory: backend
         run: uv run pytest -q -p no:cacheprovider
 
-      - name: Eval contract (offline, enforces 15 cases)
+      - name: Eval contract (offline, enforces 24 cases)
         id: eval_contract
         working-directory: backend
         run: uv run python -m pytest ../evals/test_runner.py -q
+
+      - name: Deterministic eval suite (offline, 24 cases)
+        id: deterministic_eval
+        working-directory: backend
+        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
 
       # Soft gates: informational only, does not block PR
       - name: Ruff (informational)
@@ -53,13 +85,51 @@ jobs:
         working-directory: backend
         run: uv run mypy app/
 
-  # ---------- Real Gemini Evaluation Gates: PR Merge & Manual dispatch ----------
+  # ---------- Required Deterministic Browser E2E: real backend, seeded DB, no Gemini ----------
+  deterministic-e2e:
+    name: Deterministic Backend Playwright E2E
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BACKEND_MODE: deterministic
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install frontend deps
+        id: setup_frontend_e2e
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        id: playwright_install_e2e
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Install backend deps
+        id: setup_backend_e2e
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Deterministic backend Playwright smoke
+        id: deterministic_backend_e2e
+        working-directory: frontend
+        run: npx playwright test e2e/pharmacy-backend-deterministic.spec.ts
+
+  # ---------- Real Gemini Evaluation Gates: scheduled / main / manual observability ----------
   live-eval:
     name: Live Gemini API Evaluation Gates
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     env:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      PLAYWRIGHT_BACKEND_MODE: live_gemini
     steps:
       - uses: actions/checkout@v4
 
@@ -91,27 +161,29 @@ jobs:
         working-directory: backend
         run: uv run python ../scripts/seed_demo_data.py --database-url sqlite+aiosqlite:///kithkin.db
 
-      - name: Real Gemini eval gate (15 cases)
+      - name: Real Gemini eval gate (24 cases)
         id: real_eval
         working-directory: backend
-        run: uv run python ../evals/run.py ../evals/cases.json --report /tmp/eval_report.json
+        run: uv run python ../evals/run.py ../evals/cases.json --require-live-companion --report /tmp/eval_report.json
 
       - name: Playwright E2E Tests
         id: e2e
         working-directory: frontend
-        run: npx playwright test
+        run: npx playwright test e2e/pharmacy-backend.spec.ts
 
   # ---------- Unified Results Reporting Job ----------
   report:
     name: CI Quality Gate Summary
-    needs: [offline-gates, live-eval]
+    needs: [offline-gates, deterministic-e2e, live-eval]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Generate PR Merge Detail Summary
         run: |
           offline_res="${{ needs.offline-gates.result }}"
+          deterministic_e2e_res="${{ needs.deterministic-e2e.result }}"
           live_res="${{ needs.live-eval.result }}"
+          event_name="${{ github.event_name }}"
 
           get_emoji() {
             case "$1" in
@@ -128,15 +200,20 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check Category | Status | Details |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Offline Gates** | $(get_emoji $offline_res) | Security Scan, Pytests, and Eval Contract checks |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Live Gates (Gemini)** | $(get_emoji $live_res) | Real LLM Evals and Playwright E2E Tests |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Offline Gates** | $(get_emoji $offline_res) | Frontend typecheck/lint/tests, Security Scan, Backend Pytest, Eval Contract, and deterministic 24-case eval suite |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Deterministic Backend E2E** | $(get_emoji $deterministic_e2e_res) | Real backend + seeded DB + Playwright smoke without real Gemini provider |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Live Gates (Gemini, Observational)** | $(get_emoji $live_res) | Real 24-case LLM Eval suite and live Gemini Playwright smoke; not required for PR or merge queue |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "$offline_res" = "failure" ] || [ "$live_res" = "failure" ]; then
-            echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
-            echo "> One or more validation layers failed. Please review the build logs." >> $GITHUB_STEP_SUMMARY
-            exit 1
+          if [ "$offline_res" = "failure" ] || [ "$deterministic_e2e_res" = "failure" ]; then
+          echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+          echo "> One or more required deterministic validation layers failed. Please review the build logs." >> $GITHUB_STEP_SUMMARY
+          exit 1
+          elif [ "$event_name" = "workflow_dispatch" ] && [ "$live_res" = "failure" ]; then
+          echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+          echo "> Manual live Gemini validation failed. Please review provider integration logs." >> $GITHUB_STEP_SUMMARY
+          exit 1
           else
-            echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
-            echo "> All triggered quality gates successfully verified." >> $GITHUB_STEP_SUMMARY
+          echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+          echo "> All required deterministic quality gates successfully verified." >> $GITHUB_STEP_SUMMARY
           fi

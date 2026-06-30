@@ -103,12 +103,12 @@ class RuntimeCommandService:
             return (
                 RuntimeCommandEvent(
                     "audio.muted",
-                    {"muted": False, "reason": "user_control"},
+                    {"muted": True, "reason": "user_control"},
                     event.event_id,
                 ),
                 RuntimeCommandEvent(
                     "audio.listening",
-                    {"active": True},
+                    {"active": False},
                     event.event_id,
                 ),
             )

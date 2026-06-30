@@ -11,6 +11,7 @@ from sqlalchemy import delete
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+DEFAULT_DATABASE_URL = f"sqlite+aiosqlite:///{(BACKEND / 'kithkin.db').as_posix()}"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
@@ -29,6 +30,8 @@ DEMO_MEDICATION_ID = UUID("00000000-0000-4000-8000-000000000201")
 DEMO_ALLERGY_ID = UUID("00000000-0000-4000-8000-000000000202")
 DEMO_VISIT_ID = UUID("00000000-0000-4000-8000-000000000203")
 DEMO_VISIT_IDEMPOTENCY_KEY = UUID("00000000-0000-4000-8000-000000000204")
+DEMO_OVERSEAS_VISIT_ID = UUID("00000000-0000-4000-8000-000000000205")
+DEMO_OVERSEAS_VISIT_IDEMPOTENCY_KEY = UUID("00000000-0000-4000-8000-000000000206")
 NOW = datetime(2026, 6, 22, 0, 0, tzinfo=UTC)
 
 
@@ -75,8 +78,12 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
                 user_id=DEMO_USER_ID,
                 name="Lisinopril",
                 dose="10 mg once daily",
-                notes="Blood pressure medicine to confirm with pharmacist before new medicines.",
-                tags=["profile", "medications", "blood_pressure"],
+                notes=(
+                    "Blood pressure medicine. Use this as an authorised profile fact "
+                    "only when asking the pharmacist to confirm suitability of new "
+                    "pain, inflammation, cold, or allergy medicines."
+                ),
+                tags=["profile", "medications", "blood_pressure", "hypertension"],
                 updated_at=NOW,
             )
         )
@@ -97,14 +104,63 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
                 session_id=DEMO_SESSION_ID,
                 key="visit_summary:demo_prior_pharmacy",
                 value={
-                    "mentioned_drugs": ["Lisinopril"],
-                    "pharmacist_advice_summary": "Asked pharmacist to check compatibility before buying cold medicine.",
-                    "unresolved_questions": ["Confirm any new medicine with pharmacist."],
+                    "mentioned_drugs": ["Lisinopril", "ibuprofen", "cold medicine"],
+                    "pharmacist_advice_summary": (
+                        "Prior pharmacy note: because the parent takes Lisinopril, "
+                        "ask the pharmacist to check any new pain, inflammation, "
+                        "cold, or allergy medicine before purchase."
+                    ),
+                    "unresolved_questions": [
+                        "Confirm any new pain or inflammation medicine with the pharmacist."
+                    ],
                     "follow_up_needed": False,
                     "family_notification_requested": False,
+                    "pharmacist_stated_advice": (
+                        "Ask the pharmacist to check new pain, inflammation, cold, "
+                        "or allergy medicines against Lisinopril."
+                    ),
+                    "unresolved_follow_up_questions": [
+                        "Confirm any new pain or inflammation medicine with the pharmacist."
+                    ],
+                    "confirmed_family_follow_up": False,
                 },
-                tags=["visit_summary", "pharmacy", "demo"],
+                tags=["visit_summary", "pharmacy", "demo", "follow_up"],
                 idempotency_key=DEMO_VISIT_IDEMPOTENCY_KEY,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        await session.merge(
+            VisitSummary(
+                id=DEMO_OVERSEAS_VISIT_ID,
+                user_id=DEMO_USER_ID,
+                session_id=DEMO_SESSION_ID,
+                key="visit_summary:demo_overseas_similarity_question",
+                value={
+                    "mentioned_drugs": ["overseas pain medicine"],
+                    "pharmacist_advice_summary": (
+                        "Prior pharmacy note: the parent asked about a medicine used "
+                        "overseas, but the active ingredient was not recorded. The "
+                        "pharmacist should verify the active ingredient and intended "
+                        "use before suggesting a local option."
+                    ),
+                    "unresolved_questions": [
+                        "Ask the pharmacist to verify active ingredient and intended use."
+                    ],
+                    "follow_up_needed": True,
+                    "family_notification_requested": False,
+                    "pharmacist_stated_advice": (
+                        "Verify the overseas medicine's active ingredient and intended "
+                        "use before comparing it with local options."
+                    ),
+                    "unresolved_follow_up_questions": [
+                        "Ask the pharmacist which local option matches the verified "
+                        "active ingredient or intended use."
+                    ],
+                    "confirmed_family_follow_up": False,
+                },
+                tags=["visit_summary", "pharmacy", "demo", "overseas_medicine", "follow_up"],
+                idempotency_key=DEMO_OVERSEAS_VISIT_IDEMPOTENCY_KEY,
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -165,15 +221,15 @@ async def seed(database_url: str, *, cleanup: bool) -> dict[str, int]:
             )
         await session.commit()
     await engine.dispose()
-    return {"users": 1, "medications": 1, "allergies": 1, "visit_summaries": 1}
+    return {"users": 1, "medications": 1, "allergies": 1, "visit_summaries": 2}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--database-url",
-        default="sqlite+aiosqlite:///backend/kithkin_test.db",
-        help="Async SQLAlchemy SQLite URL to seed.",
+        default=DEFAULT_DATABASE_URL,
+        help="Async SQLAlchemy SQLite URL to seed. Defaults to backend/kithkin.db.",
     )
     parser.add_argument("--cleanup", action="store_true", help="Remove deterministic demo rows.")
     return parser.parse_args()

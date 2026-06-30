@@ -90,16 +90,8 @@ RESPONSE_NEEDED_MARKERS = (
     "prescription",
     "pick up",
     "refill",
-    "how can i help",
-    "how are you",
-    "good morning",
-    "good afternoon",
-    "good evening",
     "你好",
     "怎么帮您",
-    "早上好",
-    "下午好",
-    "晚上好",
     "有什么需要",
     "配药",
     "取药",
@@ -107,6 +99,20 @@ RESPONSE_NEEDED_MARKERS = (
 PASSIVE_TRANSLATION_MARKERS = (
     "may make you sleepy",
     "avoid driving",
+)
+SMALL_TALK_MARKERS = (
+    "hi",
+    "hello",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "how are you",
+    "how can i help",
+    "what can i help",
+    "你好",
+    "早上好",
+    "下午好",
+    "晚上好",
 )
 
 
@@ -177,16 +183,15 @@ class RouterAgent(BaseAgent):
                 confidence=0.9,
                 reason_code=RouteReasonCode.PHARMACY_TERM,
             )
+        if any(marker in text_lower for marker in SMALL_TALK_MARKERS):
+            return RouteDecision(
+                route_type=RouteType.PASSIVE_TRANSLATION,
+                confidence=0.86,
+                reason_code=RouteReasonCode.ROUTINE_TRANSLATION,
+            )
 
-        is_greeting = text_lower.startswith(
-            ("hi", "hello", "good morning", "good afternoon", "good evening")
-        ) or any(
-            marker in text_lower
-            for marker in ("hello", "how can i help", "how are you", "你好", "怎么帮您")
-        )
         if (
-            is_greeting
-            or any(marker in text_lower for marker in RESPONSE_NEEDED_MARKERS)
+            any(marker in text_lower for marker in RESPONSE_NEEDED_MARKERS)
             or "?" in text_lower
             or text_lower.startswith(("do ", "does ", "can ", "would "))
         ):

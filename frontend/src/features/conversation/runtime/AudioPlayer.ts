@@ -1,3 +1,5 @@
+import { conversationDebug } from "../debugLog";
+
 type WindowWithWebkitAudioContext = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
@@ -18,16 +20,39 @@ const isBrowser = getAudioContextConstructor() !== undefined;
 export class AudioPlayer {
   private audioContext: AudioContext | null = null;
   private nextPlayTime = 0;
+  private playedChunkCount = 0;
 
   start(): void {
-    if (!isBrowser) return;
-    if (this.audioContext) return;
+    conversationDebug("audio_player.start.request", {
+      isBrowser,
+      alreadyStarted: this.audioContext !== null,
+    });
+    if (!isBrowser) {
+      conversationDebug("audio_player.start.skipped_not_browser");
+      return;
+    }
+    if (this.audioContext) {
+      conversationDebug("audio_player.start.already_started");
+      return;
+    }
     this.audioContext = createAudioContext();
     this.nextPlayTime = 0;
+    this.playedChunkCount = 0;
+    conversationDebug("audio_player.start.ready", {
+      sampleRate: this.audioContext.sampleRate,
+      state: this.audioContext.state,
+    });
   }
 
   play(pcmBuffer: ArrayBuffer): void {
-    if (!isBrowser || !this.audioContext) return;
+    if (!isBrowser || !this.audioContext) {
+      conversationDebug("audio_player.play.skipped", {
+        isBrowser,
+        hasAudioContext: this.audioContext !== null,
+        byteLength: pcmBuffer.byteLength,
+      });
+      return;
+    }
 
     // Convert Int16Array back to Float32Array for AudioBuffer
     const int16Array = new Int16Array(pcmBuffer);
@@ -51,13 +76,28 @@ export class AudioPlayer {
 
     source.start(this.nextPlayTime);
     this.nextPlayTime += audioBuffer.duration;
+    this.playedChunkCount += 1;
+    conversationDebug("audio_player.play.scheduled", {
+      chunkCount: this.playedChunkCount,
+      byteLength: pcmBuffer.byteLength,
+      sampleCount: float32Array.length,
+      durationSeconds: audioBuffer.duration,
+      startTime: this.nextPlayTime - audioBuffer.duration,
+      nextPlayTime: this.nextPlayTime,
+      contextTime: currentTime,
+    });
   }
 
   stop(): void {
+    conversationDebug("audio_player.stop", {
+      hadAudioContext: this.audioContext !== null,
+      playedChunkCount: this.playedChunkCount,
+    });
     if (this.audioContext) {
       void this.audioContext.close();
       this.audioContext = null;
     }
     this.nextPlayTime = 0;
+    this.playedChunkCount = 0;
   }
 }

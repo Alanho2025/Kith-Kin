@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BottomControls } from "../components/BottomControls";
-import { ConfirmationSheet } from "../components/ConfirmationSheet";
 import { GuardianWarningCard } from "../components/GuardianWarningCard";
 import { ResponseCard } from "../components/ResponseCard";
 import { StatusBar } from "../components/StatusBar";
 import { TwoLayerSubtitle } from "../components/TwoLayerSubtitle";
 import { useCardConfirmation } from "../features/conversation/hooks/useCardConfirmation";
 import { useLiveConversation } from "../features/conversation/hooks/useLiveConversation";
+import { conversationDebug, summarizeState } from "../features/conversation/debugLog";
 import type { ConversationRuntime } from "../features/conversation/runtime/ConversationRuntime";
-import type { RuntimeCommandView } from "../features/conversation/viewModels";
+import type {
+  ConversationTurnView,
+  MicrophoneModeView,
+  ProductOptionView,
+  RuntimeCommandView,
+} from "../features/conversation/viewModels";
 import { VisitSummaryPage } from "./VisitSummaryPage";
 
 
@@ -19,13 +24,138 @@ export interface ConversationPageProps {
   onRestart?: () => void;
 }
 
+type ActiveMicMode = MicrophoneModeView;
+
+const CARD_INTENT_LABELS = ["确认理解", "问清楚", "请慢一点"];
+
+function ConversationLog({ turns }: { turns: readonly ConversationTurnView[] }) {
+  if (turns.length === 0) {
+    return (
+      <p className="rounded-lg border border-dashed border-slate-300 p-4 text-base text-slate-500">
+        开始收听后，这里会显示本轮 session 的上下文。
+      </p>
+    );
+  }
+
+  // Deduplicate adjacent turns with identical sourceText or translatedText
+  const deduplicatedTurns: ConversationTurnView[] = [];
+  for (const turn of turns) {
+    const prev = deduplicatedTurns[deduplicatedTurns.length - 1];
+    if (
+      prev &&
+      ((prev.sourceText === turn.sourceText && turn.sourceText) ||
+        (prev.translatedText === turn.translatedText && turn.translatedText))
+    ) {
+      continue;
+    }
+    deduplicatedTurns.push(turn);
+  }
+
+  return (
+    <>
+      {deduplicatedTurns.map((turn) => {
+        const isPharmacist = turn.speaker === "pharmacist";
+        const isKkRelay = turn.speaker === "kk";
+        const speakerLabel = isPharmacist
+          ? "医护人员"
+          : isKkRelay
+          ? "KK 代说"
+          : turn.speaker === "parent"
+          ? "老人原话"
+          : turn.speaker === "system"
+          ? "系统"
+          : "未知来源";
+        return (
+          <article
+            key={turn.transcriptEventId}
+            className={`max-w-[92%] rounded-lg border px-4 py-3 ${
+              isPharmacist
+                ? "mr-auto border-slate-200 bg-slate-50"
+                : isKkRelay
+                ? "ml-auto border-sky-200 bg-sky-50"
+                : "ml-auto border-teal-200 bg-teal-50"
+            }`}
+          >
+            <p className="text-sm font-bold text-slate-500">
+              {speakerLabel}
+            </p>
+            <p className="mt-1 text-lg font-bold leading-relaxed text-navy">
+              {turn.translatedText || turn.sourceText}
+            </p>
+            {turn.translatedText ? (
+              <p className="mt-2 text-sm leading-relaxed text-slate-500">
+                {turn.sourceText}
+              </p>
+            ) : null}
+          </article>
+        );
+      })}
+    </>
+  );
+}
+
+function ProductOptionsTable({ options }: { options: readonly ProductOptionView[] }) {
+  if (options.length === 0) return null;
+
+  return (
+    <section className="space-y-3" aria-label="药师说的产品选项">
+      <div>
+        <p className="text-sm font-bold uppercase text-teal-700">药师说的产品选项</p>
+        <h2 className="text-2xl font-bold text-navy">
+          只整理药师刚才说过的信息。
+        </h2>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <table className="min-w-full divide-y divide-slate-200 text-left text-base">
+          <thead className="bg-slate-50 text-sm font-bold text-slate-600">
+            <tr>
+              <th scope="col" className="px-4 py-3">产品</th>
+              <th scope="col" className="px-4 py-3">药师说的用途</th>
+              <th scope="col" className="px-4 py-3">药师说的用法</th>
+              <th scope="col" className="px-4 py-3">药师说的注意事项</th>
+              <th scope="col" className="px-4 py-3">价格</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 bg-white">
+            {options.map((option) => (
+              <tr key={option.name}>
+                <td className="px-4 py-3 font-bold text-navy">{option.name}</td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedUse || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedDirections || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 text-slate-700">
+                  {option.pharmacistStatedCautions || "药师还没有说明"}
+                </td>
+                <td className="px-4 py-3 font-semibold text-slate-700">
+                  {option.price || "药师还没有报价"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function isSystemThoughtText(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return text.includes("**") || text.startsWith("Analyzing") || text.startsWith("Awaiting");
+}
+
 export function ConversationPage({
   runtime,
   sessionId,
   onRestart,
 }: ConversationPageProps) {
-  const { state, sendCommand, dismissConfirmation } = useLiveConversation(runtime, sessionId);
+  const { state, sendCommand, setMicrophoneMode: setRuntimeMicrophoneMode, dismissConfirmation } = useLiveConversation(runtime, sessionId);
   const [inputText, setInputText] = useState("");
+  const [activeMicMode, setActiveMicMode] = useState<ActiveMicMode>(null);
+  const [devMode, setDevMode] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   const { selectCard, confirm, cancel } = useCardConfirmation(
     state.activeCardSet,
@@ -34,17 +164,107 @@ export function ConversationPage({
     dismissConfirmation,
   );
 
+  const [isActionLocked, setIsActionLocked] = useState(false);
+
+  useEffect(() => {
+    conversationDebug("page.state.rendered", summarizeState(state));
+  }, [state]);
+
+  const handleConfirm = async () => {
+    conversationDebug("page.confirm.click", { confirmation: state.confirmation });
+    setIsActionLocked(true);
+    try {
+      await confirm();
+    } finally {
+      setIsActionLocked(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    conversationDebug("page.cancel.click", { confirmation: state.confirmation });
+    setIsActionLocked(true);
+    try {
+      await cancel();
+    } finally {
+      setIsActionLocked(false);
+    }
+  };
+
+  const handleSelfSpeak = () => {
+    conversationDebug("page.self_speak.click", { confirmation: state.confirmation });
+    setIsActionLocked(true);
+    try {
+      selfSpeak();
+    } finally {
+      setIsActionLocked(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        conversationDebug("page.visibility.restore_microphone", { activeMicMode });
+        setRuntimeMicrophoneMode(activeMicMode);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeMicMode, setRuntimeMicrophoneMode]);
+
   const dispatchControl = (command: RuntimeCommandView) => {
+    conversationDebug("page.control.command", command);
+    if (command.eventType === "control.please_wait" || command.eventType === "session.end") {
+      setActiveMicMode(null);
+      setRuntimeMicrophoneMode(null);
+    }
     void sendCommand(command);
   };
   const selfSpeak = () => {
+    conversationDebug("page.self_speak.command");
+    setActiveMicMode(null);
+    setRuntimeMicrophoneMode(null);
     dismissConfirmation();
     void sendCommand({ eventType: "control.self_speak", payload: {} });
+  };
+  const setMicrophoneMode = (mode: ActiveMicMode) => {
+    conversationDebug("page.microphone.mode", { mode });
+    setActiveMicMode(mode);
+    setRuntimeMicrophoneMode(mode);
+  };
+  const togglePharmacistMic = () => {
+    conversationDebug("page.pharmacist_mic.toggle", {
+      previousMode: activeMicMode,
+      nextMode: activeMicMode === "pharmacist" ? null : "pharmacist",
+    });
+    setMicrophoneMode(activeMicMode === "pharmacist" ? null : "pharmacist");
+  };
+  const startParentMic = () => {
+    conversationDebug("page.parent_mic.start");
+    setMicrophoneMode("parent");
+  };
+  const stopParentMic = () => {
+    conversationDebug("page.parent_mic.stop");
+    setMicrophoneMode(null);
+  };
+  const triggerRepeat = () => {
+    conversationDebug("page.repeat.click");
+    void sendCommand({
+      eventType: "control.repeat",
+      payload: { target: "last_translation" },
+    });
   };
 
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+    conversationDebug("page.typed_pharmacist.submit", {
+      text: inputText.trim(),
+      activeMicMode,
+    });
+    setActiveMicMode(null);
+    setRuntimeMicrophoneMode(null);
     void sendCommand({
       eventType: "transcript.final",
       payload: {
@@ -69,84 +289,299 @@ export function ConversationPage({
     );
   }
 
+  const isReceivingSpeech = state.status === "transcribing" || state.status === "translating";
+  const hasConfirmation = Boolean(state.confirmation);
+  const filteredTurns = state.turns.filter((turn) => {
+    if (devMode) return true;
+    return !isSystemThoughtText(turn.sourceText) && !isSystemThoughtText(turn.translatedText);
+  });
+
+  const filteredChineseSegments = state.chineseSegments.filter((seg) => {
+    if (devMode) return true;
+    return !isSystemThoughtText(seg.translatedText);
+  });
+
+  const filteredPartialEnglish =
+    !devMode && isSystemThoughtText(state.partialEnglish)
+      ? ""
+      : state.partialEnglish;
+
+  const showResponseCards = Boolean(
+    state.activeCardSet &&
+    !state.guardianWarning &&
+    !isReceivingSpeech &&
+    !hasConfirmation,
+  );
+
+  // Derive active stage label and titles
+  const mainStateLabel = hasConfirmation
+    ? "确认代说"
+    : showResponseCards
+    ? "请选择回应"
+    : activeMicMode === "parent"
+    ? "正在听您说中文"
+    : activeMicMode === "pharmacist"
+    ? "正在听药剂师说话"
+    : "正在听药剂师说话";
+
+  const mainInstruction = hasConfirmation
+    ? "你要让我用英文说这句吗？"
+    : showResponseCards
+    ? "点选一句安全回应。点选后还需要再次确认，KK 不会自动说出。"
+    : "先听懂药剂师的话。翻译完成后，再选择一句安全回应。";
+
   return (
     <main className="min-h-screen bg-cool-canvas text-navy">
-      <StatusBar status={state.status} />
-      <div className="mx-auto grid max-w-screen-2xl lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="hidden border-r border-slate-200 bg-white px-6 py-8 lg:block" aria-label="最近的对话">
-          <h2 className="text-xl font-bold">最近的对话</h2>
-          <div className="mt-5 space-y-4">
-            {state.turns.map((turn) => (
-              <div key={turn.transcriptEventId} className="border-b border-slate-200 pb-4">
-                <p className="text-sm font-bold text-slate-400">
-                  {turn.speaker === "pharmacist" ? "药剂师 (Pharmacist)" : "您 (Parent)"}
-                </p>
-                <p className="text-lg font-semibold leading-relaxed">
-                  {turn.translatedText || turn.sourceText}
-                </p>
+      <StatusBar status={state.status} onToggleDevMode={() => setDevMode((prev) => !prev)} />
+      <div className="mx-auto grid max-w-screen-2xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_28rem] lg:px-6">
+        <section className="flex min-h-[calc(100vh-7rem)] flex-col rounded-lg border border-slate-200 bg-white" aria-label="实时药局对话">
+          <div className="flex-1 space-y-6 px-5 py-6 sm:px-8 lg:px-10">
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+              <p className="text-sm font-bold uppercase text-teal-700">
+                {mainStateLabel}
+              </p>
+              <h2 className="mt-1 text-3xl font-bold leading-tight text-navy">
+                听懂药剂师，再安全回应
+              </h2>
+              <p className="mt-2 text-lg leading-relaxed text-slate-600">
+                {mainInstruction}
+              </p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <button
+                  type="button"
+                  onClick={togglePharmacistMic}
+                  className={`min-h-16 rounded-2xl px-5 py-4 text-xl font-bold text-white shadow-sm focus:outline-none focus-visible:ring-4 ${
+                    activeMicMode === "pharmacist"
+                      ? "bg-red-600 focus-visible:ring-red-200"
+                      : "bg-teal-700 focus-visible:ring-teal-300"
+                  }`}
+                  aria-pressed={activeMicMode === "pharmacist"}
+                >
+                  {activeMicMode === "pharmacist" ? "停止收听" : "听药剂师说话"}
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={startParentMic}
+                  onPointerUp={stopParentMic}
+                  onPointerLeave={stopParentMic}
+                  onKeyDown={(event) => {
+                    if (event.key === " " || event.key === "Enter") startParentMic();
+                  }}
+                  onKeyUp={(event) => {
+                    if (event.key === " " || event.key === "Enter") stopParentMic();
+                  }}
+                  className={`min-h-16 rounded-2xl border-2 px-5 py-4 text-xl font-bold focus:outline-none focus-visible:ring-4 ${
+                    activeMicMode === "parent"
+                      ? "border-red-500 bg-red-50 text-red-700 focus-visible:ring-red-200"
+                      : "border-teal-700 bg-white text-teal-800 focus-visible:ring-teal-300"
+                  }`}
+                  aria-pressed={activeMicMode === "parent"}
+                >
+                  按住说中文
+                </button>
+                <button
+                  type="button"
+                  onClick={triggerRepeat}
+                  className="min-h-16 rounded-2xl border-2 border-teal-700 bg-white text-teal-800 px-5 py-4 text-xl font-bold focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-300"
+                >
+                  请药剂师再说一次
+                </button>
               </div>
-            ))}
-          </div>
-        </aside>
-        <div className="flex min-h-[calc(100vh-5rem)] flex-col bg-white">
-          <div className="flex-1 space-y-6 px-5 py-7 sm:px-8 lg:px-12 lg:py-10">
-            <form onSubmit={handleSendText} className="mb-6 flex gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
-              <input
-                type="text"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="⌨️ 語音無效時的替代文字輸入（例如：Do you have any drug allergies?）"
-                className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-              <button
-                type="submit"
-                className="rounded-xl bg-teal-700 px-6 py-2 text-lg font-bold text-white hover:bg-teal-800 transition focus:outline-none focus:ring-2 focus:ring-teal-300"
-              >
-                发送
-              </button>
-            </form>
+            </div>
 
             <TwoLayerSubtitle
-              partialEnglish={state.partialEnglish}
-              chineseSegments={state.chineseSegments}
+              partialEnglish={filteredPartialEnglish}
+              chineseSegments={filteredChineseSegments}
             />
 
-            {state.activeCardSet && !state.guardianWarning ? (
-              <section className="rounded-2xl bg-teal-50 px-5 py-4 text-lg font-semibold leading-relaxed text-navy" aria-label="KK 提醒">
-                KK 正在帮您检查过敏和用药记录。
+            <ProductOptionsTable options={state.productOptions} />
+
+            {/* State C: Inline Confirmation Panel */}
+            {hasConfirmation && state.confirmation ? (
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirmation-title"
+                className="space-y-4 border border-teal-200 bg-teal-50/30 rounded-2xl p-6"
+              >
+                <div>
+                  <p className="text-sm font-bold uppercase text-teal-700">
+                    确认代说
+                  </p>
+                  <h2 id="confirmation-title" className="text-2xl font-bold text-navy">
+                    你要让我用英文说这句吗？
+                  </h2>
+                  <p className="text-base text-slate-500">
+                    确认后 KK 才会替您说给药剂师听。
+                  </p>
+                </div>
+                <blockquote className="rounded-xl border border-teal-200 bg-white p-5 text-xl font-bold leading-relaxed text-navy">
+                  {state.confirmation.card.zhText}
+                  <span className="mt-3 block text-base font-semibold leading-relaxed text-slate-500">
+                    {state.confirmation.card.enText}
+                  </span>
+                </blockquote>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() => { void handleConfirm(); }}
+                    disabled={isActionLocked}
+                    className="min-h-12 rounded-xl bg-teal-700 px-5 py-3 text-lg font-bold text-white transition hover:bg-teal-800 focus-visible:ring-4 focus-visible:ring-teal-300 disabled:opacity-50"
+                  >
+                    替我说
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleCancel(); }}
+                    disabled={isActionLocked}
+                    className="min-h-12 rounded-xl border-2 border-slate-300 bg-white px-5 py-3 text-lg font-semibold text-red-700 transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-red-200 disabled:opacity-50"
+                  >
+                    重选
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelfSpeak}
+                    disabled={isActionLocked}
+                    className="min-h-12 rounded-xl border-2 border-slate-300 bg-white px-5 py-3 text-lg font-semibold text-navy transition hover:bg-slate-50 focus-visible:ring-4 focus-visible:ring-slate-300 disabled:opacity-50"
+                  >
+                    取消
+                  </button>
+                </div>
               </section>
             ) : null}
+
+            {/* State B: Card selection list */}
+            {showResponseCards && state.activeCardSet ? (
+              <section className="space-y-3" aria-label="选择安全回应">
+                <div>
+                  <p className="text-sm font-bold uppercase text-teal-700">
+                    请选择回应
+                  </p>
+                  <h2 className="text-2xl font-bold text-navy">
+                    一次只选一句，下一步再确认代说。
+                  </h2>
+                </div>
+                {state.activeCardSet.cards.slice(0, 3).map((card, index) => (
+                  <ResponseCard
+                    key={card.cardId}
+                    card={card}
+                    intentLabel={CARD_INTENT_LABELS[index] ?? "安全回应"}
+                    recommended={index === 0}
+                    onSelect={(selected) => void selectCard(selected)}
+                  />
+                ))}
+              </section>
+            ) : null}
+
+            {showResponseCards ? (
+              <section className="rounded-lg border border-teal-200 bg-teal-50 px-5 py-4 text-lg font-semibold leading-relaxed text-navy" aria-label="安全检查状态">
+                安全检查已完成。这句话只是确认理解，不替您做医疗判断。
+              </section>
+            ) : null}
+
+            {/* Developer Mode Trace details */}
+            {devMode ? (
+              <details className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-4" open>
+                <summary className="cursor-pointer text-base font-bold text-slate-700">
+                  安全检查详情
+                </summary>
+                <dl className="mt-3 grid gap-2 text-sm text-slate-600 sm:grid-cols-2">
+                  <div>
+                    <dt className="font-semibold text-slate-900">Router</dt>
+                    <dd>{state.activeCardSet ? "pharmacy_conversation" : "waiting"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold text-slate-900">Guardian</dt>
+                    <dd>{state.guardianWarning ? "blocked" : "sanitized"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold text-slate-900">Tools</dt>
+                    <dd>{state.activeCardSet ? "visible after safe routing" : "none"}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-semibold text-slate-900">Confirmation</dt>
+                    <dd>{state.confirmation ? "required" : "none"}</dd>
+                  </div>
+                </dl>
+              </details>
+            ) : null}
+
+            {/* Mobile conversation log drawer trigger */}
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen(true)}
+              className="lg:hidden w-full min-h-12 rounded-xl border-2 border-slate-300 bg-slate-50 hover:bg-slate-100 px-4 py-2 text-lg font-bold text-navy"
+            >
+              查看对话记录
+            </button>
 
             {state.guardianWarning ? (
               <GuardianWarningCard warning={state.guardianWarning} />
             ) : null}
 
             {state.visibleError ? (
-              <section role="status" className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-5 text-lg font-semibold leading-relaxed">
+              <section role="status" className="rounded-lg border-2 border-amber-400 bg-amber-50 p-5 text-lg font-semibold leading-relaxed">
                 {state.visibleError.messageZh}
-              </section>
-            ) : null}
-
-            {state.activeCardSet ? (
-              <section className="space-y-3" aria-label="回应选择">
-                {state.activeCardSet.cards.map((card) => (
-                  <ResponseCard key={card.cardId} card={card} onSelect={(selected) => void selectCard(selected)} />
-                ))}
               </section>
             ) : null}
           </div>
           <BottomControls onCommand={dispatchControl} />
-        </div>
+        </section>
+
+        <aside className="hidden min-h-[calc(100vh-7rem)] flex-col rounded-lg border border-slate-200 bg-white lg:flex" aria-label="对话记录">
+          <div className="border-b border-slate-200 px-5 py-5">
+            <h2 className="text-2xl font-bold">对话记录</h2>
+            <p className="mt-1 text-base text-slate-500">
+              中文为主，英文为辅，方便回看本轮上下文。
+            </p>
+          </div>
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+            <ConversationLog turns={filteredTurns} />
+          </div>
+          <form onSubmit={handleSendText} className="border-t border-slate-200 p-4">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="语音无效时输入医护人员英文"
+              className="min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            <button
+              type="submit"
+              className="mt-3 min-h-12 w-full rounded-lg bg-teal-700 px-6 py-2 text-lg font-bold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-300"
+            >
+              发送
+            </button>
+          </form>
+        </aside>
       </div>
 
-      {state.confirmation ? (
-        <ConfirmationSheet
-          confirmation={state.confirmation}
-          onConfirm={() => void confirm()}
-          onCancel={() => void cancel()}
-          onSelfSpeak={selfSpeak}
-        />
-      ) : null}
+      {/* Mobile Drawer Overlay - Rendered but visually hidden when closed to keep text in DOM for tests */}
+      <div
+        className={
+          isDrawerOpen
+            ? "fixed inset-0 z-40 bg-navy/55 flex justify-end lg:hidden"
+            : "hidden"
+        }
+        role="complementary"
+        aria-label="对话记录"
+      >
+        <div className="w-full max-w-md bg-white h-full flex flex-col p-5 shadow-2xl">
+          <div className="flex items-center justify-between border-b pb-3">
+            <h2 className="text-xl font-bold text-navy">对话记录</h2>
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen(false)}
+              className="text-slate-500 hover:text-navy font-bold text-xl px-2"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-4 py-4">
+            <ConversationLog turns={filteredTurns} />
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

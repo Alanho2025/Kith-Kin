@@ -20,7 +20,7 @@ export interface TranslationSegmentView {
 export interface ConversationTurnView {
   utteranceId: string;
   transcriptEventId: string;
-  speaker: "parent" | "pharmacist" | "unknown";
+  speaker: "parent" | "pharmacist" | "kk" | "system" | "unknown";
   sourceText: string;
   translatedText: string | null;
 }
@@ -37,9 +37,11 @@ export interface ResponseCardView {
   cardId: string;
   zhText: string;
   enText: string;
+  speakZh?: string;
   riskLevel: CardRiskLevelView;
   actionType: CardActionTypeView;
 }
+
 
 export interface CardSetView {
   cardSetId: string;
@@ -47,10 +49,30 @@ export interface CardSetView {
   cards: readonly ResponseCardView[];
 }
 
+export interface ProductOptionView {
+  name: string;
+  price: string | null;
+  pharmacistStatedUse: string | null;
+  pharmacistStatedDirections: string | null;
+  pharmacistStatedCautions: string | null;
+}
+
 export interface ConfirmationView {
   confirmationId: string;
   cardSetId: string;
   card: ResponseCardView;
+}
+
+export interface CardActionTrailEntry {
+  eventId: string;
+  eventType: string;
+  timestamp: string;
+  confirmationId: string | null;
+  cardSetId: string | null;
+  cardId: string | null;
+  actionType: CardActionTypeView | null;
+  phase: string | null;
+  replayed: boolean | null;
 }
 
 export interface GuardianWarningView {
@@ -83,6 +105,8 @@ export interface ConversationState {
   turns: readonly ConversationTurnView[];
   chineseSegments: readonly TranslationSegmentView[];
   activeCardSet: CardSetView | null;
+  actions: readonly CardActionTrailEntry[];
+  productOptions: readonly ProductOptionView[];
   confirmation: ConfirmationView | null;
   guardianWarning: GuardianWarningView | null;
   visibleError: SafeRuntimeMessageView | null;
@@ -90,6 +114,8 @@ export interface ConversationState {
   seenEventIds: ReadonlySet<string>;
   activeUtteranceId: string | null;
 }
+
+export type MicrophoneModeView = "pharmacist" | "parent" | null;
 
 export interface ConversationRuntimeEvent {
   schemaVersion: string;
@@ -112,6 +138,10 @@ export type RuntimeCommandView =
   | { eventType: "control.self_speak"; payload: Record<string, never> }
   | { eventType: "control.please_wait"; payload: Record<string, never> }
   | { eventType: "control.repeat"; payload: { target: "last_translation" } }
+  | {
+      eventType: "audio.speaker_changed";
+      payload: { speaker: "parent" | "pharmacist" };
+    }
   | {
       eventType: "session.end";
       payload: { reason: "user_completed" | "user_cancelled" };

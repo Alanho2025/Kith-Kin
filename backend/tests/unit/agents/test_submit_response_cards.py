@@ -64,9 +64,11 @@ def valid_draft_card() -> dict[str, object]:
         "card_type": "confirm_info",
         "zh_text": "请向药剂师确认我的过敏史",
         "en_text": "Please confirm my allergy history with the pharmacist.",
+        "speak_zh": "打扰一下，请确认患者目前的过敏信息。",
         "risk_level": "medical",
         "action": {"type": "speak"},
     }
+
 
 
 @pytest.mark.anyio
@@ -121,6 +123,8 @@ def test_valid_draft_materializes_into_backend_owned_card_set():
     assert card.requires_parent_confirmation is True
     assert card.guardian_decision_id == "guardian-review-1"
     assert card.zh_text == "请向药剂师确认我的过敏史"
+    assert card.speak_zh == "打扰一下，请确认患者目前的过敏信息。"
+
 
 
 @pytest.mark.anyio

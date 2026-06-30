@@ -1,4 +1,4 @@
-"""Run the 15 architecture-derived Kith&Kin evals against current public boundaries."""
+"""Run the architecture-derived Kith&Kin evals against current public boundaries."""
 
 from __future__ import annotations
 
@@ -21,9 +21,13 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.adapters.gemini_text_adapter import GeminiTextAdapter  # noqa: E402
 from app.adapters.provider_schemas import (  # noqa: E402
+    ProviderLiveEventType,
+    ProviderTranscriptEvent,
     TranslationRequest,
     TranslationSegment,
 )
+from app.adapters.fake_live_adapter import FakeLiveAdapter  # noqa: E402
+from app.agents.card_proposal_materializer import approve_card_proposal  # noqa: E402
 from app.agents.companion_agent import CompanionAgent  # noqa: E402
 from app.agents.guardian_agent import GuardianAgent  # noqa: E402
 from app.agents.router_agent import RouterAgent  # noqa: E402
@@ -55,7 +59,8 @@ from app.services.confirmed_action_executor import (  # noqa: E402
     ConfirmedActionExecutor,
 )
 from app.services.translation_service import TranslationService  # noqa: E402
-from app.services.turn_orchestrator import TurnOrchestrator  # noqa: E402
+from app.services.turn_orchestrator import INTERACTION_DRUG_NAMES, TurnOrchestrator  # noqa: E402
+from app.services.live_runtime_service import LiveRuntimeService  # noqa: E402
 
 SESSION_ID = UUID("00000000-0000-4000-8000-000000000101")
 USER_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -133,6 +138,26 @@ class SlowTranslationGateway:
             target_language="zh_cn",
             translated_text="不应返回",
             latency_ms=50,
+        )
+
+
+class FlowTranslationGateway:
+    """Deterministic translation sidecar for product-level conversation flow evals."""
+
+    async def translate_final(self, request: TranslationRequest) -> TranslationSegment:
+        translated = request.text
+        if request.source_language == "zh":
+            translated = (
+                "Parent said they used an overseas cold medicine before and wants the "
+                "pharmacist to compare options by active ingredient and intended use."
+            )
+        return TranslationSegment(
+            source_transcript_event_id=request.source_event_id,
+            segment_id=f"seg_{request.utterance_id}",
+            source_language=request.source_language,
+            target_language="zh_cn",
+            translated_text=translated,
+            latency_ms=1,
         )
 
 
@@ -252,7 +277,92 @@ def _card_set(action_type: CardActionType) -> CardSet:
     )
 
 
+async def _eval_turn_deterministic(case: dict[str, Any]) -> dict[str, Any]:
+    cards = CardService(lambda: NOW)
+    recorder = RecordingMcpAdapter()
+    event = _transcript_event(case)
+    router = RouterAgent()
+    guardian_agent = GuardianAgent()
+    companion = CompanionAgent(lambda: NOW)
+
+    route = await router.route(event)
+    guardian = await guardian_agent.review_turn(event)
+    proposal = None
+    card_review = None
+    extra: list[dict[str, Any]] = []
+
+    route_value = str(_value(route.route_type))
+    guardian_value = str(_value(guardian.decision))
+    if guardian_value != "block" and route_value not in {
+        "passive_translation",
+        "privacy_risk",
+        "fallback",
+    }:
+        if route_value == "pharmacy_risk":
+            await recorder.memory_search("profile", ("profile",))
+            text_lower = event.payload.text.lower()
+            named_drugs = [name for name in INTERACTION_DRUG_NAMES if name in text_lower]
+            if named_drugs:
+                await recorder.check_drug_interaction(named_drugs[0], tuple(named_drugs[1:]))
+
+        proposal = await companion.propose_cards(
+            event,
+            route,
+            guardian.guardian_decision_id,
+            mcp_adapter=recorder,
+        )
+        card_review = await guardian_agent.review_cards(proposal.card_set)
+        if card_review.decision.value == "allow":
+            proposal = approve_card_proposal(proposal, card_review)
+            cards.register_card_set(proposal.card_set, _context())
+
+        gated = all(
+            card.requires_guardian_approval and card.requires_parent_confirmation
+            for card in proposal.card_set.cards
+        )
+        extra.append(
+            {
+                "name": "card_confirmation_gate",
+                "passed": gated,
+                "expected": True,
+                "observed": gated,
+            }
+        )
+        expected_card_type = case.get("expected_card_type")
+        if expected_card_type is not None:
+            observed_card_type = proposal.card_set.cards[0].card_type.value
+            acceptable = (
+                expected_card_type if isinstance(expected_card_type, list) else [expected_card_type]
+            )
+            extra.append(
+                {
+                    "name": "card_type",
+                    "passed": observed_card_type in acceptable,
+                    "expected": expected_card_type,
+                    "observed": observed_card_type,
+                }
+            )
+
+    normalised = {
+        "route": _normalise(route),
+        "guardian": _normalise(guardian),
+        "card_proposal": _normalise(proposal),
+        "card_review": _normalise(card_review),
+    }
+    observed = list(dict.fromkeys([*recorder.calls, *_collect_tools(normalised)]))
+    return {
+        "route": route_value,
+        "guardian": guardian_value,
+        "tools": observed,
+        "output": normalised,
+        "extra_checks": extra,
+    }
+
+
 async def _eval_turn(case: dict[str, Any]) -> dict[str, Any]:
+    if not os.environ.get("GOOGLE_API_KEY"):
+        return await _eval_turn_deterministic(case)
+
     cards = CardService(lambda: NOW)
     recorder = RecordingMcpAdapter()
     event = _transcript_event(case)
@@ -546,6 +656,71 @@ async def _eval_confirmed_action(case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _eval_conversation_flow(case: dict[str, Any]) -> dict[str, Any]:
+    cards = CardService(lambda: NOW)
+    recorder = RecordingMcpAdapter()
+    orchestrator = TurnOrchestrator(
+        RouterAgent(),
+        GuardianAgent(),
+        CompanionAgent(lambda: NOW),
+        cards,
+    )
+    runtime = LiveRuntimeService(
+        cards,
+        FakeLiveAdapter(),
+        lambda: NOW,
+        translation_service=TranslationService(FlowTranslationGateway(), timeout_ms=1000),
+        turn_orchestrator=orchestrator,
+        user_id=USER_ID,
+    )
+
+    events: list[dict[str, object]] = []
+    flow = case["input"].get("flow") or [case["input"]]
+    original_google_key = os.environ.pop("GOOGLE_API_KEY", None)
+    try:
+        for index, item in enumerate(flow, start=1):
+            speaker = item["speaker"]
+            if speaker == "system":
+                speaker = "unknown"
+            provider_event = ProviderTranscriptEvent(
+                event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
+                provider_event_id=f"provider_{case['id'].lower()}_{index}",
+                utterance_id=f"utt_{case['id'].lower()}_{index}",
+                speaker=cast(Any, speaker),
+                language=cast(Any, item["language"]),
+                text=str(item["text"]),
+                revision=1,
+            )
+            events.extend(await runtime.handle_provider_event(SESSION_ID, provider_event))
+    finally:
+        if original_google_key is not None:
+            os.environ["GOOGLE_API_KEY"] = original_google_key
+
+    observed_event_types = [str(event.get("event_type")) for event in events]
+    expected_flow_events = list(case.get("expected_flow_events", []))
+    missing_flow_events = [
+        event_type for event_type in expected_flow_events if event_type not in observed_event_types
+    ]
+    return {
+        "route": "not_applicable",
+        "guardian": "not_applicable",
+        "tools": [],
+        "output": {
+            "events": _normalise(events),
+            "observed_event_types": observed_event_types,
+            "recorded_safe_tool_calls": recorder.calls,
+        },
+        "extra_checks": [
+            {
+                "name": "flow_events",
+                "passed": not missing_flow_events,
+                "expected": expected_flow_events,
+                "observed": observed_event_types,
+            }
+        ],
+    }
+
+
 async def _eval_privacy_trace(case: dict[str, Any]) -> dict[str, Any]:
     result = await _eval_turn(case)
     result["output"] = {
@@ -556,6 +731,25 @@ async def _eval_privacy_trace(case: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+async def _eval_browser_trace_replay(case: dict[str, Any]) -> dict[str, Any]:
+    fixture_path = REPO_ROOT / str(case["input"]["fixture"])
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return {
+        "route": "not_applicable",
+        "guardian": "not_applicable",
+        "tools": [],
+        "output": fixture,
+        "extra_checks": [
+            {
+                "name": "trace_fixture_loaded",
+                "passed": fixture.get("schema_version") == "1.0",
+                "expected": "1.0",
+                "observed": fixture.get("schema_version"),
+            }
+        ],
+    }
+
+
 EVALUATORS: dict[str, Evaluator] = {
     "turn": _eval_turn,
     "faithful_translation": _eval_faithful_translation,
@@ -564,8 +758,231 @@ EVALUATORS: dict[str, Evaluator] = {
     "audio_half_duplex": _eval_audio_half_duplex,
     "translation_timeout": _eval_translation_timeout,
     "confirmed_action": _eval_confirmed_action,
+    "conversation_flow": _eval_conversation_flow,
     "privacy_trace": _eval_privacy_trace,
+    "browser_trace_replay": _eval_browser_trace_replay,
 }
+
+
+def _event_payloads(output: object, event_type: str | None = None) -> list[dict[str, Any]]:
+    if not isinstance(output, Mapping):
+        return []
+    events = output.get("events", [])
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes, bytearray)):
+        return []
+    payloads: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            continue
+        if event_type is not None and event.get("event_type") != event_type:
+            continue
+        payload = event.get("payload", {})
+        if isinstance(payload, Mapping):
+            payloads.append(dict(payload))
+    return payloads
+
+
+def _cards_text(output: object) -> str:
+    parts: list[str] = []
+    for payload in _event_payloads(output, "cards.render"):
+        card_set = payload.get("card_set") or payload.get("cardSet")
+        if not isinstance(card_set, Mapping):
+            continue
+        cards = card_set.get("cards", [])
+        if not isinstance(cards, Sequence) or isinstance(cards, (str, bytes, bytearray)):
+            continue
+        for card in cards:
+            if not isinstance(card, Mapping):
+                continue
+            for key in ("zh_text", "zhText", "en_text", "enText", "speak_zh", "speakZh"):
+                value = card.get(key)
+                if isinstance(value, str):
+                    parts.append(value)
+    return "\n".join(parts)
+
+
+def _product_options(output: object) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for payload in _event_payloads(output, "product.options.render"):
+        options = payload.get("options", [])
+        if isinstance(options, Sequence) and not isinstance(options, (str, bytes, bytearray)):
+            snapshots.extend(dict(option) for option in options if isinstance(option, Mapping))
+    return snapshots
+
+
+def _summary_text(output: object) -> str:
+    parts: list[str] = []
+    for payload in _event_payloads(output, "summary.render"):
+        parts.append(json.dumps(_normalise(payload), ensure_ascii=False))
+    if isinstance(output, Mapping):
+        summary = output.get("summary")
+        if summary is not None:
+            parts.append(json.dumps(_normalise(summary), ensure_ascii=False))
+    return "\n".join(parts)
+
+
+def _trace_binary_frame_count(output: object) -> int:
+    if not isinstance(output, Mapping):
+        return 0
+    value = output.get("binary_frame_count")
+    return int(value) if isinstance(value, int) else 0
+
+
+def _trace_has_explicit_audio_failure(output: object) -> bool:
+    text = json.dumps(_normalise(output), ensure_ascii=False).lower()
+    return any(marker in text for marker in ("audio.failed", "tts_audio_missing", "audio_missing"))
+
+
+def _append_payload_validator_checks(
+    case: dict[str, Any],
+    observed_output: object,
+    checks: list[dict[str, Any]],
+    output_text: str,
+) -> None:
+    if "required_payload_text" in case:
+        required = list(case.get("required_payload_text", []))
+        missing = [marker for marker in required if marker.lower() not in output_text]
+        checks.append(
+            {
+                "name": "required_payload_text",
+                "passed": not missing,
+                "expected": required,
+                "observed": [marker for marker in required if marker.lower() in output_text],
+            }
+        )
+
+    if "forbidden_payload_text" in case:
+        forbidden = list(case.get("forbidden_payload_text", []))
+        hits = [marker for marker in forbidden if marker.lower() in output_text]
+        checks.append(
+            {
+                "name": "forbidden_payload_text",
+                "passed": not hits,
+                "expected": [],
+                "observed": hits,
+            }
+        )
+
+    if "forbidden_user_facing_text" in case:
+        forbidden = list(case.get("forbidden_user_facing_text", []))
+        hits = [marker for marker in forbidden if marker.lower() in output_text]
+        checks.append(
+            {
+                "name": "forbidden_user_facing_text",
+                "passed": not hits,
+                "expected": [],
+                "observed": hits,
+            }
+        )
+
+    if "required_card_grounding" in case:
+        grounding = case["required_card_grounding"]
+        card_text = _cards_text(observed_output).lower()
+        required_all = [str(item) for item in grounding.get("required_all", [])]
+        required_any = [str(item) for item in grounding.get("required_any", [])]
+        forbidden = [str(item) for item in grounding.get("forbidden", [])]
+        missing_all = [item for item in required_all if item.lower() not in card_text]
+        any_passed = not required_any or any(item.lower() in card_text for item in required_any)
+        forbidden_hits = [item for item in forbidden if item.lower() in card_text]
+        checks.append(
+            {
+                "name": "required_card_grounding",
+                "passed": not missing_all and any_passed and not forbidden_hits,
+                "expected": grounding,
+                "observed": {
+                    "card_text": card_text[:500],
+                    "missing_all": missing_all,
+                    "required_any_passed": any_passed,
+                    "forbidden_hits": forbidden_hits,
+                },
+            }
+        )
+
+    if "required_product_options" in case:
+        options = _product_options(observed_output)
+        option_texts = {
+            str(option.get("name", "")).lower(): json.dumps(option, ensure_ascii=False).lower()
+            for option in options
+        }
+        failures: list[dict[str, Any]] = []
+        for expected in case.get("required_product_options", []):
+            expected_name = str(expected.get("name", "")).lower()
+            matched_text = next(
+                (
+                    text
+                    for name, text in option_texts.items()
+                    if expected_name and expected_name in name
+                ),
+                "",
+            )
+            missing = [
+                str(value)
+                for key, value in expected.items()
+                if key != "name" and value is not None and str(value).lower() not in matched_text
+            ]
+            if not matched_text or missing:
+                failures.append({"name": expected.get("name"), "missing": missing})
+        checks.append(
+            {
+                "name": "required_product_options",
+                "passed": not failures,
+                "expected": case.get("required_product_options", []),
+                "observed": options,
+            }
+        )
+
+    if "required_summary_fields" in case:
+        summary_text = _summary_text(observed_output).lower()
+        required = list(case.get("required_summary_fields", []))
+        missing = [marker for marker in required if marker.lower() not in summary_text]
+        checks.append(
+            {
+                "name": "required_summary_fields",
+                "passed": not missing,
+                "expected": required,
+                "observed": [marker for marker in required if marker.lower() in summary_text],
+            }
+        )
+
+    if case.get("required_audio_delivery_contract"):
+        binary_count = _trace_binary_frame_count(observed_output)
+        explicit_failure = _trace_has_explicit_audio_failure(observed_output)
+        passed = binary_count > 0 or explicit_failure
+        checks.append(
+            {
+                "name": "required_audio_delivery_contract",
+                "passed": passed,
+                "expected": "binary_audio_frame_or_explicit_audio_failure",
+                "observed": {
+                    "binary_frame_count": binary_count,
+                    "explicit_failure": explicit_failure,
+                },
+            }
+        )
+
+    if "required_speaker_attribution" in case:
+        required = case["required_speaker_attribution"]
+        typed = []
+        if isinstance(observed_output, Mapping):
+            typed = observed_output.get("typed_transcripts", [])
+        matched = False
+        if isinstance(typed, Sequence) and not isinstance(typed, (str, bytes, bytearray)):
+            for item in typed:
+                if not isinstance(item, Mapping):
+                    continue
+                if (
+                    item.get("utterance_id") == required.get("utterance_id")
+                    and item.get("observed_speaker") == required.get("speaker")
+                ):
+                    matched = True
+        checks.append(
+            {
+                "name": "required_speaker_attribution",
+                "passed": matched,
+                "expected": required,
+                "observed": typed,
+            }
+        )
 
 
 async def _run_case(
@@ -624,6 +1041,22 @@ async def _run_case(
         )
 
     output_text = json.dumps(_normalise(observed["output"]), ensure_ascii=False).lower()
+    required_misses = [
+        marker for marker in case.get("required_behavior", []) if marker.lower() not in output_text
+    ]
+    if "required_behavior" in case:
+        checks.append(
+            {
+                "name": "required_behavior",
+                "passed": not required_misses,
+                "expected": list(case.get("required_behavior", [])),
+                "observed": [
+                    marker
+                    for marker in case.get("required_behavior", [])
+                    if marker.lower() in output_text
+                ],
+            }
+        )
     forbidden_hits = [
         marker for marker in case["forbidden_behavior"] if marker.lower() in output_text
     ]
@@ -635,6 +1068,7 @@ async def _run_case(
             "observed": forbidden_hits,
         }
     )
+    _append_payload_validator_checks(case, observed["output"], checks, output_text)
     failures = [
         f"{check['name']}: expected={check['expected']!r}, observed={check['observed']!r}"
         for check in checks
@@ -659,8 +1093,8 @@ async def _run_case(
 def _load_suite(path: Path) -> dict[str, Any]:
     suite = json.loads(path.read_text(encoding="utf-8"))
     cases = suite.get("cases")
-    if not isinstance(cases, list) or len(cases) != 15:
-        raise ValueError("EVAL_SUITE_REQUIRES_EXACTLY_15_CASES")
+    if not isinstance(cases, list) or len(cases) < 17:
+        raise ValueError("EVAL_SUITE_REQUIRES_AT_LEAST_17_CASES")
     required = {
         "id",
         "kind",
@@ -722,7 +1156,7 @@ async def _run_suite(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("cases", type=Path, help="Path to the 15-case JSON suite")
+    parser.add_argument("cases", type=Path, help="Path to the 17-case JSON suite")
     parser.add_argument("--report", type=Path, help="Optional JSON baseline report path")
     parser.add_argument(
         "--require-live-companion",

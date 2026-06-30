@@ -2,8 +2,10 @@ import type { ConversationRuntime } from "./ConversationRuntime";
 import type {
   CardSetView,
   ConversationRuntimeEvent,
+  MicrophoneModeView,
   RuntimeCommandView,
 } from "../viewModels";
+import { conversationDebug, summarizeCommand, summarizeRuntimeEvent } from "../debugLog";
 
 
 function isCardSetPayload(value: unknown): value is { cardSet: CardSetView } {
@@ -16,6 +18,8 @@ function isCardSetPayload(value: unknown): value is { cardSet: CardSetView } {
 
 export class MockConversationRuntime implements ConversationRuntime {
   readonly commands: RuntimeCommandView[] = [];
+  microphoneEnabled = false;
+  microphoneMode: MicrophoneModeView = null;
   private readonly listeners = new Set<(event: ConversationRuntimeEvent) => void>();
   private readonly cardSet: CardSetView | null;
   private sessionId = "mock-session";
@@ -33,6 +37,11 @@ export class MockConversationRuntime implements ConversationRuntime {
 
   async connect(sessionId: string): Promise<void> {
     this.sessionId = sessionId;
+    conversationDebug("mock_runtime.connect", {
+      sessionId,
+      flowEvents: this.flow.map((event) => event.eventType),
+      delayMs: this.delayMs,
+    });
     if (this.delayMs > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, 300));
     }
@@ -49,11 +58,23 @@ export class MockConversationRuntime implements ConversationRuntime {
   }
 
   disconnect(): Promise<void> {
+    conversationDebug("mock_runtime.disconnect", { sessionId: this.sessionId });
     this.listeners.clear();
     return Promise.resolve();
   }
 
+  setMicrophoneEnabled(enabled: boolean): void {
+    this.setMicrophoneMode(enabled ? "pharmacist" : null);
+  }
+
+  setMicrophoneMode(mode: MicrophoneModeView): void {
+    conversationDebug("mock_runtime.microphone.mode", { mode });
+    this.microphoneMode = mode;
+    this.microphoneEnabled = mode !== null;
+  }
+
   async sendCommand(command: RuntimeCommandView): Promise<void> {
+    conversationDebug("mock_runtime.command", summarizeCommand(command));
     this.commands.push(command);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     if (command.eventType === "card.select" && this.cardSet) {
@@ -79,6 +100,7 @@ export class MockConversationRuntime implements ConversationRuntime {
   }
 
   private emit(event: ConversationRuntimeEvent): void {
+    conversationDebug("mock_runtime.event.emit", summarizeRuntimeEvent(event));
     for (const listener of this.listeners) {
       listener(event);
     }

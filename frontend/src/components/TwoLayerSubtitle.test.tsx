@@ -7,7 +7,7 @@ import { makeEvent } from "../test/fixtures/runtime-events";
 
 
 describe("TwoLayerSubtitle", () => {
-  it("replaces partial and appends finals", () => {
+  it("replaces partial and shows only the latest final translation", () => {
     const firstPartial = conversationReducer(
       initialConversationState,
       makeEvent("transcript.partial", "evt-partial-1", {
@@ -64,11 +64,11 @@ describe("TwoLayerSubtitle", () => {
 
     expect(screen.queryByText("Are you taking")).not.toBeInTheDocument();
     expect(screen.getByText("Are you taking any medicine?")).toBeInTheDocument();
-    expect(screen.getByText("您有在服用任何药物吗？")).toBeInTheDocument();
+    expect(screen.queryByText("您有在服用任何药物吗？")).not.toBeInTheDocument();
     expect(screen.getByText("请告诉我药名。")).toBeInTheDocument();
   });
 
-  it("clears old segments when new utterance starts", () => {
+  it("does not keep old large-print translations when a new utterance starts", () => {
     const firstFinal = conversationReducer(
       initialConversationState,
       makeEvent("translation.final", "evt-translation-1", {

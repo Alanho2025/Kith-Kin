@@ -74,8 +74,10 @@ class CompanionCardDraft(BaseModel):
     card_type: CardType
     zh_text: Annotated[str, Field(min_length=1, max_length=120)]
     en_text: Annotated[str, Field(min_length=1, max_length=240)]
+    speak_zh: Annotated[str | None, Field(default=None, min_length=1, max_length=240)] = None
     risk_level: CardRiskLevel
     action: CardAction
+
 
     @property
     def requires_backend_materialization(self) -> bool:

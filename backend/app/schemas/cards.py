@@ -37,8 +37,10 @@ class ResponseCard(BaseModel):
     card_type: CardType
     zh_text: Annotated[str, Field(min_length=1, max_length=120)]
     en_text: Annotated[str, Field(min_length=1, max_length=240)]
+    speak_zh: Annotated[str | None, Field(default=None, min_length=1, max_length=240)] = None
     risk_level: CardRiskLevel
     action: CardAction
+
     requires_parent_confirmation: bool
     requires_guardian_approval: bool
     guardian_decision_id: Annotated[str, Field(min_length=1, max_length=80)]

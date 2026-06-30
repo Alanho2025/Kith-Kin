@@ -12,6 +12,8 @@ export function TwoLayerSubtitle({
   partialEnglish,
   chineseSegments,
 }: TwoLayerSubtitleProps) {
+  const latestChineseSegment = chineseSegments.at(-1);
+
   return (
     <section className="space-y-5" aria-label="对话翻译">
       <p className="min-h-6 text-base font-medium leading-relaxed text-slate-500" aria-label="英文原文">
@@ -22,12 +24,10 @@ export function TwoLayerSubtitle({
         aria-label="忠实中文翻译"
         aria-live="polite"
       >
-        {chineseSegments.length === 0 ? (
-          <p className="text-slate-400">中文翻译会显示在这里</p>
+        {latestChineseSegment ? (
+          <p key={latestChineseSegment.segmentId}>{latestChineseSegment.translatedText}</p>
         ) : (
-          chineseSegments.map((segment) => (
-            <p key={segment.segmentId}>{segment.translatedText}</p>
-          ))
+          <p className="text-slate-400">中文翻译会显示在这里</p>
         )}
       </div>
     </section>

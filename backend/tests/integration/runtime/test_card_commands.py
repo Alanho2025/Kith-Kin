@@ -118,18 +118,17 @@ async def test_invalid_confirm_fails_closed_without_legacy_execution() -> None:
     assert executor.action_count == 0
 
 
-async def test_self_speak_restores_listening_without_card_action() -> None:
+async def test_self_speak_cancels_pending_without_reopening_microphone() -> None:
     executor = ConfirmedActionExecutor()
     commands = RuntimeCommandService(CardService(lambda: NOW, executor), USER_ID)
 
     events = await commands.handle(self_speak_event(), session_id=SESSION_ID)
 
-    # 1. unmuting event should be emitted
     assert len(events) == 2
     assert events[0].event_type == "audio.muted"
-    assert events[0].payload == {"muted": False, "reason": "user_control"}
+    assert events[0].payload == {"muted": True, "reason": "user_control"}
     assert events[1].event_type == "audio.listening"
-    assert events[1].payload == {"active": True}
+    assert events[1].payload == {"active": False}
     assert executor.action_count == 0
 
 

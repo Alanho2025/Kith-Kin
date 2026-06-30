@@ -75,3 +75,74 @@ async def test_guardian_blocks_prompt_injection_in_card_text() -> None:
 
     assert decision.decision is GuardianDecisionType.BLOCK
     assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_FAILED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "en_text",
+    [
+        "Ask pharmacist: Does Ibuprofen conflict with my meds?",
+        "Should I take Coenzyme Q10?",
+        "I should take ibuprofen.",
+        "I have no allergies.",
+        "Ask pharmacist to write down the drug name",
+        "The patient is currently taking Lisinopril. Could you please note this?",
+        "Let KK ask the pharmacist to write down the medicine name.",
+    ],
+)
+async def test_guardian_blocks_pharmacy_cards_that_are_not_parent_confirmation_questions(
+    en_text: str,
+) -> None:
+    decision = await GuardianAgent().review_cards(candidate_card_set(en_text))
+
+    assert decision.decision is GuardianDecisionType.BLOCK
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_FAILED
+
+
+@pytest.mark.anyio
+async def test_guardian_allows_parent_direct_question_to_pharmacist() -> None:
+    decision = await GuardianAgent().review_cards(
+        candidate_card_set(
+            "Could you please check whether ibuprofen is suitable with my current medicines?"
+        )
+    )
+
+    assert decision.decision is GuardianDecisionType.ALLOW
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_PASSED
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "en_text",
+    [
+        "I recommend you buy Panadol.",
+        "Panadol is the best option for you.",
+        "Nurofen is safer for your blood pressure medicine.",
+        "This medicine is compatible with your current medication.",
+        "This is the same medicine you used in China.",
+        "Codral is equivalent to your overseas cold medicine.",
+        "Option C has fewer side effects.",
+    ],
+)
+async def test_guardian_blocks_recommendation_comparison_compatibility_and_equivalence(
+    en_text: str,
+) -> None:
+    decision = await GuardianAgent().review_cards(candidate_card_set(en_text))
+
+    assert decision.decision is GuardianDecisionType.BLOCK
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_FAILED
+
+
+@pytest.mark.anyio
+async def test_guardian_allows_similarity_question_when_pharmacist_must_confirm() -> None:
+    decision = await GuardianAgent().review_cards(
+        candidate_card_set(
+            (
+                "Could you please confirm which option, if any, is closest to the "
+                "medicine I used before by checking the active ingredient?"
+            )
+        )
+    )
+
+    assert decision.decision is GuardianDecisionType.ALLOW
+    assert decision.reason_code is GuardianReasonCode.CARD_REVIEW_PASSED

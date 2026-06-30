@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_allowed_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
 
     deployment_mode: str = "local"
     live_transport: Literal["backend_proxy", "gemini_live"] = "backend_proxy"
@@ -39,6 +41,8 @@ class Settings(BaseSettings):
     gemini_api_version: str = "v1alpha"
     gemini_live_model: str = "gemini-3.1-flash-live-preview"
     gemini_text_model: str = "gemini-2.5-flash"
+    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    gemini_tts_voice_name: str = "charon"
     gemini_live_translate_model: str = "gemini-3.5-live-translate-preview"
     live_translation_fallback_enabled: bool = False
 

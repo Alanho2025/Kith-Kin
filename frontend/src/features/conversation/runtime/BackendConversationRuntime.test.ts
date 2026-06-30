@@ -17,9 +17,12 @@ class FakeSocket implements RuntimeSocket {
   onerror: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   readonly sent: string[] = [];
+  readonly sentBinary: ArrayBufferLike[] = [];
 
   send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+    if (this.readyState !== WebSocket.OPEN) throw new Error("SOCKET_NOT_OPEN");
     if (typeof data === "string") this.sent.push(data);
+    else if (data instanceof ArrayBuffer) this.sentBinary.push(data);
   }
 
   close(): void {
@@ -35,6 +38,10 @@ class FakeSocket implements RuntimeSocket {
   emitJson(value: object): void {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(value) }));
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 
@@ -146,10 +153,58 @@ describe("BackendConversationRuntime", () => {
     await expect(connected).rejects.toThrow("RUNTIME_DISCONNECTED");
   });
 
+  it("queues typed fallback text while the backend socket is still opening", async () => {
+    vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-queued", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-queued");
+    await Promise.resolve();
+    await runtime.sendCommand({
+      eventType: "transcript.final",
+      payload: {
+        utteranceId: "utt-queued-fallback",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Good morning. How are you today?",
+        revision: 1,
+      },
+    });
+
+    expect(socket.sent).toHaveLength(0);
+    socket.emitOpen();
+    await connected;
+
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      event_type: "transcript.final",
+      payload: {
+        utterance_id: "utt-queued-fallback",
+        speaker: "pharmacist",
+        text: "Good morning. How are you today?",
+      },
+    });
+  });
+
   it("plays binary messages and handles audio.muted events", async () => {
     const playSpy = vi.spyOn(AudioPlayer.prototype, "play").mockImplementation(() => {});
     const startPlayerSpy = vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
-    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation(() => Promise.resolve());
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
     const pauseSpy = vi.spyOn(AudioRecorder.prototype, "pause").mockImplementation(() => {});
     const resumeSpy = vi.spyOn(AudioRecorder.prototype, "resume").mockImplementation(() => {});
 
@@ -173,7 +228,13 @@ describe("BackendConversationRuntime", () => {
     await connected;
 
     expect(startPlayerSpy).toHaveBeenCalled();
+    expect(startRecorderSpy).not.toHaveBeenCalled();
+
+    runtime.setMicrophoneEnabled(true);
     expect(startRecorderSpy).toHaveBeenCalled();
+    const pcm = new ArrayBuffer(10);
+    sendAudio(pcm);
+    expect(socket.sentBinary).toEqual([pcm]);
 
     // Emit binary message
     const buffer = new ArrayBuffer(10);
@@ -195,6 +256,8 @@ describe("BackendConversationRuntime", () => {
       },
     });
     expect(pauseSpy).toHaveBeenCalled();
+    sendAudio(new ArrayBuffer(10));
+    expect(socket.sentBinary).toEqual([pcm]);
 
     // Emit audio.muted (false)
     socket.emitJson({
@@ -212,10 +275,138 @@ describe("BackendConversationRuntime", () => {
     });
     expect(resumeSpy).toHaveBeenCalled();
 
+    runtime.setMicrophoneEnabled(false);
+    expect(pauseSpy).toHaveBeenCalledTimes(2);
+
     playSpy.mockRestore();
     startPlayerSpy.mockRestore();
     startRecorderSpy.mockRestore();
     pauseSpy.mockRestore();
     resumeSpy.mockRestore();
+  });
+
+  it("announces parent speaker mode before sending parent microphone audio", async () => {
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
+    vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-1", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-1");
+    await Promise.resolve();
+    socket.emitOpen();
+    await connected;
+
+    runtime.setMicrophoneMode("parent");
+    const pcm = new ArrayBuffer(8);
+    sendAudio(pcm);
+
+    expect(startRecorderSpy).toHaveBeenCalled();
+    expect(socket.sent).toHaveLength(1);
+    expect(JSON.parse(socket.sent[0])).toMatchObject({
+      event_type: "audio.speaker_changed",
+      payload: { speaker: "parent" },
+    });
+    expect(socket.sentBinary).toEqual([pcm]);
+
+    startRecorderSpy.mockRestore();
+  });
+
+  it("pauses microphone binary frames while sending typed pharmacist fallback text", async () => {
+    let sendAudio!: (data: ArrayBuffer) => void;
+    const startRecorderSpy = vi.spyOn(AudioRecorder.prototype, "start").mockImplementation((sendFn) => {
+      sendAudio = sendFn;
+      return Promise.resolve();
+    });
+    const pauseSpy = vi.spyOn(AudioRecorder.prototype, "pause").mockImplementation(() => {});
+    const resumeSpy = vi.spyOn(AudioRecorder.prototype, "resume").mockImplementation(() => {});
+    const startPlayerSpy = vi.spyOn(AudioPlayer.prototype, "start").mockImplementation(() => {});
+
+    const fetchFn: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ session_id: "ses-typed", expires_at: "2026-06-22T00:01:00Z", max_uses: 1 }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+    const socket = new FakeSocket();
+    const runtime = new BackendConversationRuntime({
+      fetchFn,
+      socketFactory: () => socket,
+      baseUrl: "http://localhost:8000",
+    });
+
+    const connected = runtime.connect("ses-typed");
+    await Promise.resolve();
+    socket.emitOpen();
+    await connected;
+
+    runtime.setMicrophoneMode("pharmacist");
+    const beforeTyped = new ArrayBuffer(8);
+    sendAudio(beforeTyped);
+    await runtime.sendCommand({
+      eventType: "transcript.final",
+      payload: {
+        utteranceId: "utt-typed-fallback",
+        speaker: "pharmacist",
+        language: "en",
+        text: "Can you give me your birthday and name?",
+        revision: 1,
+      },
+    });
+    sendAudio(new ArrayBuffer(8));
+
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(socket.sentBinary).toEqual([beforeTyped]);
+
+    startRecorderSpy.mockRestore();
+    pauseSpy.mockRestore();
+    resumeSpy.mockRestore();
+    startPlayerSpy.mockRestore();
+  });
+
+  it("surfaces ticket failures as a safe user-visible runtime error", async () => {
+    const events: ConversationRuntimeEvent[] = [];
+    const runtime = new BackendConversationRuntime({
+      fetchFn: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ code: "APP_WS_ORIGIN_FORBIDDEN" }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
+        ),
+      socketFactory: () => new FakeSocket(),
+      baseUrl: "http://127.0.0.1:8000",
+    });
+    runtime.subscribe((event) => events.push(event));
+
+    await expect(runtime.connect("ses-ticket-403")).resolves.toBeUndefined();
+    const errorEvent = events.find((event) => {
+      const payload = event.payload;
+      return (
+        event.eventType === "error.show" &&
+        isRecord(payload) &&
+        payload.code === "RUNTIME_TICKET_REQUEST_FAILED"
+      );
+    });
+    const payload = errorEvent?.payload;
+    expect(isRecord(payload) ? payload.messageZh : null).toEqual(
+      expect.stringContaining("无法连接真实后端"),
+    );
   });
 });

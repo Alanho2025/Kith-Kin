@@ -1,0 +1,145 @@
+{
+  "schema_version": "1.0",
+  "source": "sanitized Playwright pharmacy counter acceptance trace, 2026-06-29",
+  "binary_frame_count": 3,
+  "typed_transcripts": [
+    {
+      "utterance_id": "utt-typed-pharmacist-identity",
+      "declared_speaker": "pharmacist",
+      "observed_speaker": "pharmacist",
+      "text": "Can you give me your birthday and name?"
+    }
+  ],
+  "events": [
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "pharmacist",
+        "text": "Good morning. How are you today?"
+      }
+    },
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "pharmacist",
+        "text": "Can you give me your birthday and name?"
+      }
+    },
+    {
+      "event_type": "translation.final",
+      "payload": {
+        "translated_text": "您能告诉我您的生日和姓名吗？"
+      }
+    },
+    {
+      "event_type": "cards.render",
+      "payload": {
+        "card_set": {
+          "cards": [
+            {
+              "zh_text": "请药师重复需要我确认的姓名和生日。",
+              "en_text": "Could you please repeat the name and birthday you need me to confirm?"
+            },
+            {
+              "zh_text": "请药师把要核对的姓名和生日写下来。",
+              "en_text": "Could you please write down the name and birthday you need me to check?"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event_type": "transcript.final",
+      "payload": {
+        "speaker": "pharmacist",
+        "text": "I can show you three options. Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars and is for pain and inflammation, but please check with me if you take blood pressure medicine. Voltaren gel costs fifteen dollars and is for local muscle pain; do not apply it to broken skin."
+      }
+    },
+    {
+      "event_type": "product.options.render",
+      "payload": {
+        "options": [
+          {
+            "name": "Panadol",
+            "price": "8 dollars",
+            "pharmacist_stated_use": "pain and fever",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": null
+          },
+          {
+            "name": "Nurofen",
+            "price": "12 dollars",
+            "pharmacist_stated_use": "pain and inflammation",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": "please check with me if you take blood pressure medicine"
+          },
+          {
+            "name": "Voltaren gel",
+            "price": "15 dollars",
+            "pharmacist_stated_use": "local muscle pain",
+            "pharmacist_stated_directions": null,
+            "pharmacist_stated_cautions": "do not apply it to broken skin"
+          }
+        ]
+      }
+    },
+    {
+      "event_type": "card.confirmed",
+      "payload": {
+        "confirmation_id": "confirmation-nurofen-question",
+        "action_type": "show_to_pharmacist"
+      }
+    },
+    {
+      "event_type": "audio.speaking",
+      "payload": {
+        "phase": "started"
+      }
+    },
+    {
+      "event_type": "audio.speaking",
+      "payload": {
+        "phase": "completed"
+      }
+    },
+    {
+      "event_type": "card.action.status",
+      "payload": {
+        "confirmation_id": "confirmation-nurofen-question",
+        "action_type": "show_to_pharmacist",
+        "phase": "succeeded",
+        "code": null
+      }
+    },
+    {
+      "event_type": "summary.render",
+      "payload": {
+        "summary": {
+          "title_zh": "今天药局沟通重点",
+          "mentioned_drugs": ["paracetamol", "ibuprofen", "voltaren"],
+          "pharmacist_advice_summary_zh": "药师原话摘要：Panadol costs eight dollars and is for pain and fever. Nurofen costs twelve dollars and is for pain and inflammation. Voltaren gel costs fifteen dollars and is for local muscle pain. Payment can be made by cash or card.",
+          "unresolved_questions_zh": [],
+          "follow_up_needed": false,
+          "pharmacist_stated_advice_zh": "Panadol, Nurofen, and Voltaren were explained by the pharmacist; payment can be made by cash or card.",
+          "unresolved_follow_up_questions_zh": [],
+          "confirmed_family_follow_up": false
+        }
+      }
+    }
+  ],
+  "ui": {
+    "main_translation_visible": true,
+    "product_options_visible": true,
+    "summary_visible": true,
+    "conversation_log_snippets": [
+      "医护人员: 您能告诉我您的生日和姓名吗？",
+      "医护人员: I can show you three options. Panadol costs eight dollars...",
+      "药师说的产品选项: Panadol, Nurofen, Voltaren gel"
+    ]
+  },
+  "summary": {
+    "mentioned_drugs": ["Panadol", "Nurofen", "Voltaren"],
+    "payment": "cash or card",
+    "visible": true
+  }
+}

@@ -36,6 +36,31 @@ const transcriptFinalWireSchema = z
   })
   .strict();
 
+const KNOWN_RUNTIME_EVENTS = new Set([
+  "session.ready",
+  "audio.listening",
+  "audio.muted",
+  "audio.speaking",
+  "transcript.partial",
+  "transcript.final",
+  "translation.pending",
+  "translation.final",
+  "route.decision",
+  "tool.status",
+  "guardian.warning",
+  "cards.render",
+  "product.options.render",
+  "card.selected",
+  "card.confirmed",
+  "card.action.status",
+  "summary.render",
+  "memory.write.status",
+  "notification.status",
+  "fallback.show",
+  "error.show",
+  "session.ended",
+]);
+
 export function mapRuntimeEvent(input: unknown): RuntimeViewEvent {
   const envelope = runtimeEnvelopeSchema.parse(input);
   if (envelope.event_type !== "transcript.final") {
@@ -47,7 +72,7 @@ export function mapRuntimeEvent(input: unknown): RuntimeViewEvent {
       sequence: envelope.sequence,
       timestamp: envelope.timestamp,
       correlationId: envelope.correlation_id,
-      payload: null,
+      payload: KNOWN_RUNTIME_EVENTS.has(envelope.event_type) ? envelope.payload : null,
     };
   }
   const event = transcriptFinalWireSchema.parse(input);

@@ -37,3 +37,23 @@ def test_frontend_environment_contains_no_privileged_configuration() -> None:
     forbidden = ("GEMINI", "GOOGLE_API_KEY", "DATABASE_URL", "MCP", "TOKEN_SECRET")
 
     assert [name for name in forbidden if name in content] == []
+
+
+def test_backend_production_code_does_not_branch_on_eval_case_ids() -> None:
+    offenders: list[str] = []
+    for path in (ROOT / "backend/app").rglob("*.py"):
+        content = path.read_text(encoding="utf-8")
+        if "eval-015" in content:
+            offenders.append(str(path.relative_to(ROOT)))
+
+    assert offenders == []
+
+
+def test_runtime_contract_documents_product_options_event() -> None:
+    content = (ROOT / "specs/runtime-event-contract.md").read_text(encoding="utf-8")
+
+    assert "| `product.options.render` |" in content
+    assert "pharmacist_stated_use" in content
+    assert "pharmacist_stated_directions" in content
+    assert "pharmacist_stated_cautions" in content
+    assert "MUST NOT contain AI-generated pros, cons, ranking, suitability" in content

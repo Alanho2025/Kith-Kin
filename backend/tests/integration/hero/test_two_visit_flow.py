@@ -40,11 +40,22 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     def get_session_events(sid: UUID):
         return session_events
 
+    from app.services.visit_summary_service import VisitSummaryService
+    from app.adapters.notification_adapter import NotificationAdapter
+    from app.services.notification_service import NotificationService
+
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(notification_repo, notification_adapter)
+
     completion_service = VisitCompletionService(
         memory_repository=memory_repo,
-        notification_repository=notification_repo,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=clock.now,
         get_session_events=get_session_events,
     )
+
 
     confirmation_repository = InMemoryConfirmationRepository()
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
@@ -86,8 +97,12 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
     # Compile summary draft
     draft_summary = await completion_service.prepare_summary(session_1.session_id, context_1)
     assert "coenzyme q10" in draft_summary.mentioned_drugs
-    assert draft_summary.follow_up_needed is True
-    assert draft_summary.family_notification_requested is True
+    assert draft_summary.pharmacist_advice_summary == (
+        "Pharmacist said: You should try Coenzyme Q10 for your muscle aches."
+    )
+    assert draft_summary.unresolved_questions == ()
+    assert draft_summary.follow_up_needed is False
+    assert draft_summary.family_notification_requested is False
 
     # Register and confirm SAVE_MEMORY card
     card_set_id = f"cards_{uuid4()}"
@@ -174,16 +189,40 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             await self_runner.session_service.create_session(
                 app_name=self_runner.app_name, user_id=user_id, session_id=session_id
             )
-        mock_card = ResponseCard(
-            card_id=f"card_{uuid4()}",
-            card_type=CardType.ASK_QUESTION,
-            zh_text="询问药剂师：我需要服用辅酶Q10吗？",
-            en_text="Ask pharmacist: Did you mean Coenzyme Q10?",
-            risk_level=CardRiskLevel.NORMAL,
-            action=CardAction(type=CardActionType.NO_ACTION),
-            requires_parent_confirmation=True,
-            requires_guardian_approval=True,
-            guardian_decision_id=f"guardian_{uuid4()}",
+        mock_cards = (
+            ResponseCard(
+                card_id=f"card_{uuid4()}",
+                card_type=CardType.ASK_QUESTION,
+                zh_text="请帮我确认您说的是辅酶Q10吗？",
+                en_text="Could you please confirm whether you meant Coenzyme Q10?",
+                risk_level=CardRiskLevel.NORMAL,
+                action=CardAction(type=CardActionType.NO_ACTION),
+                requires_parent_confirmation=True,
+                requires_guardian_approval=True,
+                guardian_decision_id=f"guardian_{uuid4()}",
+            ),
+            ResponseCard(
+                card_id=f"card_{uuid4()}",
+                card_type=CardType.ASK_TO_WRITE_DOWN,
+                zh_text="请帮我写下药品名好吗？",
+                en_text="Could you please write down the medicine name?",
+                risk_level=CardRiskLevel.NORMAL,
+                action=CardAction(type=CardActionType.NO_ACTION),
+                requires_parent_confirmation=True,
+                requires_guardian_approval=True,
+                guardian_decision_id=f"guardian_{uuid4()}",
+            ),
+            ResponseCard(
+                card_id=f"card_{uuid4()}",
+                card_type=CardType.ASK_QUESTION,
+                zh_text="请您再重复一遍好吗？",
+                en_text="Could you please repeat that?",
+                risk_level=CardRiskLevel.NORMAL,
+                action=CardAction(type=CardActionType.NO_ACTION),
+                requires_parent_confirmation=True,
+                requires_guardian_approval=True,
+                guardian_decision_id=f"guardian_{uuid4()}",
+            ),
         )
         proposal = CardSetProposal(
             card_set=CardSet(
@@ -192,7 +231,7 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
                 source_event_id=event_2.event_id,
                 generated_at=clock.now(),
                 expires_at=clock.now() + timedelta(minutes=3),
-                cards=(mock_card,),
+                cards=mock_cards,
             ),
             proposal_hash="dummy_hash",
         )
@@ -207,8 +246,6 @@ async def test_two_visit_flow(db_sessions, first_visit_transcript, second_visit_
             event_2, route_decision, f"guardian_{uuid4()}"
         )
 
-    assert len(proposal.card_set.cards) == 1
-    card = proposal.card_set.cards[0]
-    assert card.card_type == CardType.ASK_QUESTION
-    assert "辅酶Q10" in card.zh_text
-    assert "Coenzyme Q10" in card.en_text
+    assert len(proposal.card_set.cards) == 3
+    assert any("辅酶Q10" in card.zh_text for card in proposal.card_set.cards)
+    assert any("Coenzyme Q10" in card.en_text for card in proposal.card_set.cards)

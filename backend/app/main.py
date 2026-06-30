@@ -13,6 +13,7 @@ from app.adapters.fake_live_adapter import FakeLiveAdapter
 from app.adapters.gemini_live_adapter import GeminiLiveAdapter
 from app.adapters.gemini_live_translate_adapter import GeminiLiveTranslateAdapter
 from app.adapters.gemini_text_adapter import GeminiTextAdapter
+from app.adapters.gemini_tts_adapter import GeminiTextToSpeechAdapter
 from app.adapters.mcp_tool_adapter import McpToolAdapter
 from app.agents.companion_agent import CompanionAgent
 from app.agents.guardian_agent import GuardianAgent
@@ -20,6 +21,7 @@ from app.agents.router_agent import RouterAgent
 from app.api.error_handlers import install_error_handlers
 from app.api.routes import cards, health, live, sessions
 from app.core.config import Settings
+from app.core.conversation_debug import configure_conversation_logging
 from app.db.session import create_engine, create_session_factory, initialize_database
 from app.domain.credentials import TrustedRequestContext
 from app.repositories.drug_knowledge_repository import DrugKnowledgeRepository
@@ -53,6 +55,7 @@ def create_app(
     clock: Callable[[], datetime] = utc_now,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    configure_conversation_logging(resolved_settings.log_level)
     if (
         resolved_settings.environment != "test"
         and resolved_settings.google_api_key.get_secret_value()
@@ -82,6 +85,7 @@ def create_app(
     visit_repository = VisitRepository(db_sessions)
     rag_service = RagService(resolved_settings, memory_repository, trace_repository)
     gemini_live_adapter = GeminiLiveAdapter(resolved_settings)
+    gemini_tts_adapter = GeminiTextToSpeechAdapter(resolved_settings)
     translation_gateway = (
         GeminiLiveTranslateAdapter(resolved_settings)
         if resolved_settings.live_translation_fallback_enabled
@@ -116,11 +120,26 @@ def create_app(
             return []
         return live_runtime_service._buffers.get(sid, [])
 
+    from app.adapters.notification_adapter import NotificationAdapter
+    from app.services.notification_service import NotificationService
+    from app.services.visit_summary_service import VisitSummaryService
+
+    visit_summary_service = VisitSummaryService()
+    notification_adapter = NotificationAdapter()
+    notification_service = NotificationService(
+        repository=notification_repository,
+        adapter=notification_adapter,
+    )
+
     completion_service = VisitCompletionService(
         memory_repository=memory_repository,
-        notification_repository=notification_repository,
+        visit_summary_service=visit_summary_service,
+        notification_service=notification_service,
+        clock=clock,
         get_session_events=get_session_events,
     )
+
+
     completion_executor = VisitCompletionExecutor(completion_service, confirmation_repository)
 
     card_service = CardService(
@@ -178,6 +197,7 @@ def create_app(
     app.state.visit_repository = visit_repository
     app.state.rag_service = rag_service
     app.state.gemini_live_adapter = gemini_live_adapter
+    app.state.gemini_tts_adapter = gemini_tts_adapter
     app.state.translation_service = translation_service
     app.state.turn_orchestrator = turn_orchestrator
     app.state.runtime_command_service = runtime_command_service
@@ -194,6 +214,7 @@ def create_app(
         turn_orchestrator=turn_orchestrator,
         user_id=user_id,
         live_gateway=gemini_live_adapter,
+        tts_gateway=gemini_tts_adapter,
         settings=resolved_settings,
         completion_service=completion_service,
     )

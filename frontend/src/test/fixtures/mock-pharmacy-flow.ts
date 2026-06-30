@@ -11,6 +11,13 @@ export const mockPharmacyFlow = [
     text: "Are you taking any blood pressure medicine?",
     revision: 1,
   }),
+  makeEvent("transcript.final", "evt-final", {
+    utteranceId: "utt-1",
+    speaker: "pharmacist",
+    language: "en",
+    text: "Are you taking any blood pressure medicine?",
+    revision: 2,
+  }),
   makeEvent("translation.final", "evt-translation", {
     sourceTranscriptEventId: "evt-final",
     segmentId: "segment-1",
