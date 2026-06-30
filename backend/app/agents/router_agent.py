@@ -1,5 +1,4 @@
-"""Deterministic Router agent inheriting from ADK BaseAgent."""
-
+import re
 from collections.abc import AsyncGenerator
 
 from google.adk.agents import BaseAgent
@@ -8,6 +7,16 @@ from google.adk.events import Event
 
 from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
 from app.schemas.runtime_events import TranscriptFinalEvent
+
+def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if len(marker) <= 3 and marker.isascii():
+            if re.search(r"\b" + re.escape(marker) + r"\b", text):
+                return True
+        else:
+            if marker in text:
+                return True
+    return False
 
 PHARMACY_MARKERS = (
     "medicine",
@@ -153,37 +162,37 @@ class RouterAgent(BaseAgent):
 
     def _classify(self, text: str) -> RouteDecision:
         text_lower = text.lower()
-        if any(marker in text_lower for marker in FALLBACK_MARKERS):
+        if _contains_marker(text_lower, FALLBACK_MARKERS):
             return RouteDecision(
                 route_type=RouteType.FALLBACK,
                 confidence=0.95,
                 reason_code=RouteReasonCode.ROUTER_FALLBACK,
             )
-        if any(marker in text_lower for marker in PASSIVE_TRANSLATION_MARKERS):
+        if _contains_marker(text_lower, PASSIVE_TRANSLATION_MARKERS):
             return RouteDecision(
                 route_type=RouteType.PASSIVE_TRANSLATION,
                 confidence=0.84,
                 reason_code=RouteReasonCode.ROUTINE_TRANSLATION,
             )
-        if any(marker in text_lower for marker in PRIVACY_MARKERS):
+        if _contains_marker(text_lower, PRIVACY_MARKERS):
             return RouteDecision(
                 route_type=RouteType.PRIVACY_RISK,
                 confidence=0.96,
                 reason_code=RouteReasonCode.PRIVACY_REQUEST,
             )
-        if any(marker in text_lower for marker in FAMILY_ACTION_MARKERS):
+        if _contains_marker(text_lower, FAMILY_ACTION_MARKERS):
             return RouteDecision(
                 route_type=RouteType.FAMILY_ACTION,
                 confidence=0.9,
                 reason_code=RouteReasonCode.FAMILY_SUMMARY,
             )
-        if any(marker in text_lower for marker in PHARMACY_MARKERS):
+        if _contains_marker(text_lower, PHARMACY_MARKERS):
             return RouteDecision(
                 route_type=RouteType.PHARMACY_RISK,
                 confidence=0.9,
                 reason_code=RouteReasonCode.PHARMACY_TERM,
             )
-        if any(marker in text_lower for marker in SMALL_TALK_MARKERS):
+        if _contains_marker(text_lower, SMALL_TALK_MARKERS):
             return RouteDecision(
                 route_type=RouteType.PASSIVE_TRANSLATION,
                 confidence=0.86,
@@ -191,7 +200,7 @@ class RouterAgent(BaseAgent):
             )
 
         if (
-            any(marker in text_lower for marker in RESPONSE_NEEDED_MARKERS)
+            _contains_marker(text_lower, RESPONSE_NEEDED_MARKERS)
             or "?" in text_lower
             or text_lower.startswith(("do ", "does ", "can ", "would "))
         ):

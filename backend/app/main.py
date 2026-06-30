@@ -150,6 +150,7 @@ def create_app(
     router_agent = RouterAgent()
     guardian_agent = GuardianAgent()
     companion_agent = CompanionAgent(clock, session_service)
+    companion_agent._settings = resolved_settings
 
     def mcp_tool_adapter_factory(context: TrustedRequestContext) -> McpToolAdapter:
         return McpToolAdapter(

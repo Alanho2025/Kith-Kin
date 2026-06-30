@@ -73,3 +73,7 @@ tmp/
 
 .agents/skills/
 ponytail/
+
+# Agent handover context
+.ai-bridge/
+
