@@ -88,6 +88,8 @@ class ResponseCardStateMachine:
             CardLifecycleState.SUCCEEDED,
             CardLifecycleState.FAILED,
         }:
+            # Confirmation IDs are single-use authority; any terminal or active
+            # execution state is treated as a replay attempt.
             raise ConfirmationReplayError("CONFIRMATION_REPLAYED")
         self._require(CardLifecycleState.AWAITING_CONFIRMATION)
         if now >= self.expires_at:

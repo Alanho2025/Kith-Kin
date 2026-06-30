@@ -26,6 +26,8 @@ async def live_socket(
     ticket = websocket.cookies.get(settings.app_ws_cookie_name, "")
     origin = websocket.headers.get("origin", "")
     try:
+        # Validate the one-time ticket before accepting the socket so invalid
+        # clients never get an upgraded runtime connection.
         await verifier.verify_and_consume(SecretStr(ticket), session_id, origin)
     except TicketInvalidError:
         await websocket.close(code=4401, reason="TICKET_INVALID")
@@ -39,6 +41,7 @@ async def live_socket(
     except SessionNotConnectableError:
         await websocket.close(code=4410, reason="SESSION_NOT_CONNECTABLE")
         return
+    # Session state changes only after ticket verification has established scope.
     await websocket.app.state.session_store.mark_active(session_id)
     await websocket.accept()
     await runtime.serve(

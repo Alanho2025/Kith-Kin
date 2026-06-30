@@ -24,6 +24,8 @@ const envelopeSchema = z
   })
   .strict();
 
+// Keep this interface small so tests can inject a fake WebSocket without
+// depending on browser-only implementation details.
 export interface RuntimeSocket {
   binaryType: BinaryType;
   readyState: number;
@@ -64,6 +66,8 @@ function camelCaseKey(key: string): string {
 }
 
 function camelize(value: unknown): unknown {
+  // Backend wire payloads are snake_case; reducers and components use camelCase
+  // view models consistently after this boundary.
   if (Array.isArray(value)) return value.map(camelize);
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(
@@ -76,6 +80,7 @@ function snakeCaseKey(key: string): string {
 }
 
 function snakeCase(value: unknown): unknown {
+  // Client commands mirror the backend runtime-event contract on the wire.
   if (Array.isArray(value)) return value.map(snakeCase);
   if (typeof value !== "object" || value === null) return value;
   return Object.fromEntries(
@@ -124,6 +129,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
     let response: Response;
     try {
       conversationDebug("runtime.ticket.request", { sessionId, baseUrl: this.baseUrl });
+      // The backend stores the one-time WebSocket ticket in an HTTP-only cookie;
+      // the frontend never reads or serializes the token.
       response = await this.fetchFn(
         `${this.baseUrl}/api/sessions/${sessionId}/ticket`,
         { method: "POST", credentials: "include" },
@@ -174,6 +181,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
     this.socket = socket;
     socket.onmessage = (message) => this.handleMessage(message);
 
+    // Audio player/recorder are created per connection so reconnect cleanup can
+    // close browser media resources deterministically.
     this.audioPlayer = new AudioPlayer();
     this.audioPlayer.start();
 
@@ -204,6 +213,7 @@ export class BackendConversationRuntime implements ConversationRuntime {
     }
 
     if (generation !== this.connectionGeneration) {
+      // A newer connect/disconnect won the race while the socket was opening.
       socket.close();
       return;
     }
@@ -245,6 +255,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
     });
     if (mode !== null) {
       this.activeSpeaker = mode;
+      // Speaker changes are sent even before audio frames so backend transcript
+      // labels follow the UI-selected microphone target.
       this.sendSpeakerChanged(mode);
     }
     this.userMicEnabled = mode !== null;
@@ -261,6 +273,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
   sendCommand(command: RuntimeCommandView): Promise<void> {
     if (!this.sessionId) return Promise.reject(new Error("RUNTIME_DISCONNECTED"));
     if (command.eventType === "transcript.final") {
+      // Typed fallback represents a completed pharmacist utterance, so stop live
+      // mic capture before injecting it into the runtime stream.
       this.pauseMicrophoneForTypedFallback();
     }
     conversationDebug("runtime.command.outgoing", summarizeCommand(command));
@@ -284,6 +298,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
       return Promise.resolve();
     }
     if (this.connecting) {
+      // User commands can be issued during the HTTP-ticket/WebSocket-open gap;
+      // queue them so UI actions do not depend on socket timing.
       this.pendingCommandFrames.push(frame);
       conversationDebug("runtime.command.queued", {
         eventType: command.eventType,
@@ -309,6 +325,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
 
   private handleMessage(message: MessageEvent): void {
     if (typeof message.data !== "string") {
+      // Binary frames are provider audio chunks; JSON runtime events stay on the
+      // text channel.
       if (message.data instanceof ArrayBuffer) {
         conversationDebug("runtime.websocket.audio.in", { byteLength: message.data.byteLength });
         this.audioPlayer?.play(message.data);
@@ -336,12 +354,15 @@ export class BackendConversationRuntime implements ConversationRuntime {
       const payloadObj = event.payload as Record<string, unknown> | null;
       const isMuted = payloadObj?.muted;
       if (isMuted) {
+        // Backend mute is authoritative during TTS playback; pause capture even
+        // if the user left the microphone button active.
         this.backendMuted = true;
         this.micMode = "system_speaking";
         this.audioRecorder?.pause();
         conversationDebug("runtime.audio.muted", { muted: true, micMode: this.micMode });
       } else {
         this.backendMuted = false;
+        // Restore the previous human speaker mode after backend TTS completes.
         this.micMode = this.userMicEnabled
           ? this.activeSpeaker === "parent"
             ? "user_speaking"
@@ -358,6 +379,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
   private updateRecorderGate(): void {
     const socket = this.socket;
     if (!this.audioRecorder || !socket) return;
+    // The audio gate centralizes every condition that can block microphone
+    // upload: user intent, backend mute, socket readiness, and error state.
     const wantsAudio =
       this.userMicEnabled &&
       !this.backendMuted &&
@@ -369,6 +392,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
     if (!this.recorderStarted) {
       if (!wantsAudio) return;
       this.recorderStarted = true;
+      // Start the browser recorder lazily so the permission prompt appears only
+      // when the user actually enables a microphone mode.
       void this.audioRecorder.start((pcm) => {
         if (this.getAudioGate().canSendAudio) {
           socket.send(pcm);
@@ -429,6 +454,8 @@ export class BackendConversationRuntime implements ConversationRuntime {
       previousMicMode: this.micMode,
       activeSpeaker: this.activeSpeaker,
     });
+    // Typed fallback and live mic capture are mutually exclusive inputs for one
+    // turn; pausing avoids double-submitting the same pharmacist sentence.
     this.userMicEnabled = false;
     this.micMode = "paused";
     this.audioRecorder?.pause();

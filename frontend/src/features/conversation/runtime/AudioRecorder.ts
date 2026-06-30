@@ -50,12 +50,13 @@ export class AudioRecorder {
     try {
       conversationDebug("audio_recorder.get_user_media.request");
       this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Create context with sampleRate 16000 directly if browser supports it,
-      // otherwise use default and downsample in ScriptProcessor
+      // Browser input rates vary, so capture at the native rate and normalize
+      // each frame to the backend's 16 kHz PCM contract.
       this.audioContext = createAudioContext();
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-      // Using ScriptProcessorNode (known tech debt, simple for demo integration)
+      // ScriptProcessorNode is kept here because the runtime needs a simple,
+      // deterministic PCM frame callback for the current browser demo.
       this.processorNode = this.audioContext.createScriptProcessor(2048, 1, 1);
 
       const inputRate = this.audioContext.sampleRate;
@@ -152,6 +153,8 @@ export class AudioRecorder {
     let offsetResult = 0;
     let offsetBuffer = 0;
     while (offsetResult < result.length) {
+      // Average source samples into one output sample to keep speech timing
+      // stable when the browser captures above the target rate.
       const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
       let accum = 0;
       let count = 0;

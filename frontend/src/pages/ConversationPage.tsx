@@ -37,7 +37,8 @@ function ConversationLog({ turns }: { turns: readonly ConversationTurnView[] }) 
     );
   }
 
-  // Deduplicate adjacent turns with identical sourceText or translatedText
+  // Keep only adjacent duplicate utterances out of the display log; the reducer
+  // still preserves the full event history for replay and diagnostics.
   const deduplicatedTurns: ConversationTurnView[] = [];
   for (const turn of turns) {
     const prev = deduplicatedTurns[deduplicatedTurns.length - 1];
@@ -201,6 +202,8 @@ export function ConversationPage({
   };
 
   useEffect(() => {
+    // Mobile browsers can pause capture when backgrounded; restore the selected
+    // mic mode when the tab becomes visible again.
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         conversationDebug("page.visibility.restore_microphone", { activeMicMode });
@@ -216,6 +219,8 @@ export function ConversationPage({
   const dispatchControl = (command: RuntimeCommandView) => {
     conversationDebug("page.control.command", command);
     if (command.eventType === "control.please_wait" || command.eventType === "session.end") {
+      // These commands intentionally end active capture before the backend
+      // receives the control event.
       setActiveMicMode(null);
       setRuntimeMicrophoneMode(null);
     }
@@ -223,6 +228,8 @@ export function ConversationPage({
   };
   const selfSpeak = () => {
     conversationDebug("page.self_speak.command");
+    // Self-speak means the parent is leaving the card flow, so clear local
+    // confirmation and stop runtime capture immediately.
     setActiveMicMode(null);
     setRuntimeMicrophoneMode(null);
     dismissConfirmation();
@@ -265,6 +272,8 @@ export function ConversationPage({
     });
     setActiveMicMode(null);
     setRuntimeMicrophoneMode(null);
+    // Typed fallback injects a completed pharmacist utterance into the same
+    // reducer/runtime path used by live speech.
     void sendCommand({
       eventType: "transcript.final",
       payload: {
@@ -291,6 +300,8 @@ export function ConversationPage({
 
   const isReceivingSpeech = state.status === "transcribing" || state.status === "translating";
   const hasConfirmation = Boolean(state.confirmation);
+  // System thought text remains available in developer mode but is hidden from
+  // the parent-facing conversation by default.
   const filteredTurns = state.turns.filter((turn) => {
     if (devMode) return true;
     return !isSystemThoughtText(turn.sourceText) && !isSystemThoughtText(turn.translatedText);
@@ -313,7 +324,8 @@ export function ConversationPage({
     !hasConfirmation,
   );
 
-  // Derive active stage label and titles
+  // Card selection is hidden while speech/translation or confirmation is active
+  // so the parent never chooses from stale or partially processed context.
   const mainStateLabel = hasConfirmation
     ? "确认代说"
     : showResponseCards

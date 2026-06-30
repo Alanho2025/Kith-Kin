@@ -10,7 +10,6 @@ import os
 from app.core.config import Settings
 from app.main import create_app
 
-
 settings = Settings(
     _env_file=None,
     environment="development",

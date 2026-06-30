@@ -59,6 +59,8 @@ function recordEvent(
   event: ConversationRuntimeEvent,
   changes: Partial<ConversationState>,
 ): ConversationState {
+  // Runtime events may be replayed after reconnect; track event IDs so reducers
+  // stay idempotent across resume and duplicate socket delivery.
   const seenEventIds = new Set(state.seenEventIds);
   seenEventIds.add(event.eventId);
   return { ...state, ...changes, seenEventIds };
@@ -105,6 +107,8 @@ export function conversationReducer(
   event: ConversationAction,
 ): ConversationState {
   if ("type" in event) {
+    // Local dismiss updates the confirmation UI immediately while recording the
+    // same action shape used by server card events.
     const action = state.confirmation
       ? {
           eventId: `local-dismiss-${state.confirmation.confirmationId}`,
@@ -143,6 +147,8 @@ export function conversationReducer(
         speaker?: "parent" | "pharmacist" | "unknown";
         text: string;
       };
+      // Partials update the live subtitle; finals append immutable turns that
+      // later translation.final events can enrich by transcript event ID.
       const turns = event.eventType === "transcript.final"
         ? [
             ...state.turns,
@@ -160,6 +166,8 @@ export function conversationReducer(
         status: event.eventType === "transcript.partial" ? "transcribing" : "translating",
         partialEnglish: payload.text,
         turns,
+        // New pharmacist speech invalidates an old confirmation because the
+        // conversation context has moved on.
         confirmation: isPharmacist ? null : state.confirmation,
       });
     }
@@ -179,6 +187,8 @@ export function conversationReducer(
         ? state.chineseSegments
         : [...state.chineseSegments, payload];
 
+      // Translation segments are append-only; duplicate segment IDs preserve the
+      // first rendered text and prevent replay from duplicating subtitles.
       return recordEvent(state, event, {
         status: "listening",
         turns,
@@ -212,6 +222,8 @@ export function conversationReducer(
     case "cards.render": {
       const payload = event.payload as { cardSet: RawCardSet | null };
       const rawCardSet = payload.cardSet;
+      // Accept both snake_case and camelCase because replayed backend events and
+      // direct test fixtures can enter the reducer through different mappers.
       const cardSet: CardSetView | null = rawCardSet ? {
         cardSetId: rawCardSet.cardSetId || rawCardSet.card_set_id || "",
         revision: rawCardSet.revision || 1,
@@ -272,6 +284,8 @@ export function conversationReducer(
             card,
           }
         : null;
+      // The server-minted confirmation ID is the only executable authority; the
+      // frontend keeps card text only for display.
       const action = {
         eventId: event.eventId,
         eventType: event.eventType,
@@ -311,6 +325,8 @@ export function conversationReducer(
       };
       return recordEvent(state, event, {
         status: "checking",
+        // Once confirmed, card selection UI is cleared while action status
+        // events report whether speech or side effects completed.
         confirmation: null,
         activeCardSet: null,
         actions: [...state.actions, action],
@@ -362,6 +378,8 @@ export function conversationReducer(
           : state.status;
       return recordEvent(state, event, {
         status,
+        // Speech start also clears the confirmation panel; the approved card is
+        // now owned by the action-status lifecycle.
         confirmation: null,
       });
     }
@@ -378,6 +396,8 @@ export function conversationReducer(
       });
     case "summary.render": {
       const payload = event.payload as { summary: VisitSummaryView };
+      // Summary render is a review state, not delivery. The summary page still
+      // requires an explicit send/save/cancel choice.
       return recordEvent(state, event, {
         summary: payload.summary,
         status: "needs_confirmation",

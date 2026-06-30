@@ -23,6 +23,8 @@ export function useCardConfirmation(
         revision: activeCardSet.revision,
         card,
       });
+      // Selecting a card only asks the backend to mint a confirmation ID; it
+      // never speaks or executes the card action.
       await sendCommand({
         eventType: "card.select",
         payload: {
@@ -41,6 +43,8 @@ export function useCardConfirmation(
       confirmationId: confirmation.confirmationId,
       card: confirmation.card,
     });
+    // Confirmation sends only the server-minted ID so executable text remains
+    // server-owned.
     await sendCommand({
       eventType: "card.confirm",
       payload: { confirmationId: confirmation.confirmationId },
@@ -54,6 +58,8 @@ export function useCardConfirmation(
       card: confirmation.card,
     });
     dismissConfirmation();
+    // Cancel is local-first for responsiveness, then the backend revokes the
+    // pending confirmation so stale actions cannot be confirmed later.
     await sendCommand({
       eventType: "card.cancel",
       payload: { confirmationId: confirmation.confirmationId },
