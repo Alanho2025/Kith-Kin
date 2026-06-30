@@ -16,6 +16,8 @@ export function useLiveConversation(runtime: ConversationRuntime, sessionId: str
 
   useEffect(() => {
     conversationDebug("hook.connect_effect.start", { sessionId });
+    // Subscribe before connecting so the initial session.ready replay cannot
+    // arrive before the reducer is listening.
     const unsubscribe = runtime.subscribe((event) => {
       conversationDebug("hook.runtime_event.received", summarizeRuntimeEvent(event));
       dispatch(event);
@@ -23,6 +25,8 @@ export function useLiveConversation(runtime: ConversationRuntime, sessionId: str
     void runtime.connect(sessionId);
     return () => {
       conversationDebug("hook.connect_effect.cleanup", { sessionId });
+      // Unsubscribe first so late disconnect events from an old runtime cannot
+      // mutate the next session's UI state.
       unsubscribe();
       void runtime.disconnect();
     };
@@ -58,6 +62,8 @@ export function useLiveConversation(runtime: ConversationRuntime, sessionId: str
 
   const dismissConfirmation = useCallback(() => {
     conversationDebug("hook.confirmation.dismiss");
+    // Dismiss is intentionally local-first; the cancel command is still sent by
+    // the confirmation hook when the user chooses to cancel.
     dispatch({ type: "dismiss_confirmation" });
   }, []);
 

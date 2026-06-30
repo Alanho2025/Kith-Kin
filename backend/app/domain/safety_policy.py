@@ -55,12 +55,16 @@ def disclosure_decision(
     parent_confirmed: bool,
 ) -> SafetyDecision:
     """Require both gates for health/family and block identity/payment/address disclosure."""
+    # These categories are never auto-disclosed through response cards because a
+    # parent confirmation click is not enough to make them safe in a pharmacy line.
     if category in {
         SensitiveDataCategory.IDENTITY,
         SensitiveDataCategory.PAYMENT,
         SensitiveDataCategory.ADDRESS,
     }:
         return SafetyDecision.BLOCK
+    # Health and family follow-up data require both model-side Guardian approval
+    # and an explicit parent confirmation before any outward action.
     if guardian_approved and parent_confirmed:
         return SafetyDecision.ALLOW
     return SafetyDecision.REQUIRE_CONFIRMATION
@@ -71,6 +75,8 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
     lowered = text.lower()
     prompt_markers = ("ignore previous", "system prompt", "developer message")
     if any(marker in lowered for marker in prompt_markers):
+        # Prompt-injection language is blocked before agent routing so the model
+        # never gets a chance to reinterpret system or developer instructions.
         return (
             SafetyBackstopResult.BLOCK,
             BackstopRisk.PRIVACY,
@@ -93,6 +99,8 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
             "notify family",
         )
     ):
+        # Save/send requests are not blocked outright, but they must flow through
+        # the two-stage confirmation path before persistence or notification.
         return (
             SafetyBackstopResult.REQUIRE_CONFIRMATION,
             BackstopRisk.MEDICAL,
@@ -153,6 +161,8 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
         "avoid driving",
     )
     if any(marker in lowered for marker in passive_medical_explanation_markers):
+        # Pharmacist-provided warnings can be translated passively; the app is
+        # not making a new medical recommendation in this case.
         return SafetyBackstopResult.ALLOW, BackstopRisk.NORMAL, BackstopReason.NONE
     medical_confirmation_markers = (
         "stop taking",
@@ -175,6 +185,8 @@ def screen_turn_text(text: str) -> tuple[SafetyBackstopResult, BackstopRisk, Bac
         "降血压",
     )
     if any(marker in lowered for marker in medical_confirmation_markers):
+        # Medication terms route to confirmation/card handling so Kith&Kin
+        # supports clarification without making autonomous clinical decisions.
         return (
             SafetyBackstopResult.REQUIRE_CONFIRMATION,
             BackstopRisk.MEDICAL,

@@ -8,6 +8,7 @@ from google.adk.events import Event
 from app.schemas.agent_outputs import RouteDecision, RouteReasonCode, RouteType
 from app.schemas.runtime_events import TranscriptFinalEvent
 
+
 def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
     for marker in markers:
         if len(marker) <= 3 and marker.isascii():

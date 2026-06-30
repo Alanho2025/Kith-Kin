@@ -40,6 +40,8 @@ TOOL_PERMISSION_TIERS: dict[ToolName, PermissionTier] = {
     ToolName.NOTIFY_FAMILY: PermissionTier.EXTERNAL_ACTION,
 }
 
+# Companion only sees read-only tools while reasoning; write/external tools are
+# reserved for confirmed-action executors after parent approval.
 COMPANION_READ_ONLY_TOOLS = (
     ToolName.MEMORY_SEARCH.value,
     ToolName.CHECK_DRUG_INTERACTION.value,
@@ -59,6 +61,8 @@ class McpToolAdapter:
         notification_repository: NotificationRepository,
         drug_knowledge_repository: DrugKnowledgeRepository,
     ) -> None:
+        # Context is injected by backend runtime code, not by the LLM tool call,
+        # so repositories always enforce the trusted session/user scope.
         self._settings = settings
         self._context = context
         self._rag = rag_service
@@ -89,6 +93,8 @@ class McpToolAdapter:
             tags=tags,
         )
         try:
+            # Validate tool input before touching repositories so malformed LLM
+            # arguments return a structured tool error instead of leaking stack traces.
             request = MemorySearchRequest(query=query, tags=tags)
         except ValidationError:
             conversation_log(
@@ -129,6 +135,7 @@ class McpToolAdapter:
                 retryable=True,
             )
         records = tuple(
+            # Return bounded, typed memory records rather than raw repository rows.
             MemoryRecord(
                 record_id=str(snippet.record_id),
                 key=f"{snippet.record_type}:{snippet.record_id}",
@@ -170,6 +177,8 @@ class McpToolAdapter:
             current_med_count=len(current_meds),
         )
         try:
+            # Drug checks use the same validation boundary as memory search so
+            # Companion cannot smuggle arbitrary payload shapes into repositories.
             request = DrugInteractionRequest(new_drug=new_drug, current_meds=current_meds)
         except ValidationError:
             conversation_log(
@@ -226,6 +235,8 @@ class McpToolAdapter:
         idempotency_key: UUID,
     ) -> ToolResult[MemoryWriteData]:
         try:
+            # Writes are available only to confirmed-action code paths and carry
+            # an idempotency key from the stored confirmation record.
             outcome = await _with_timeout(
                 self._settings.memory_write_timeout_ms,
                 self._memory.write_visit_summary(
@@ -270,6 +281,8 @@ class McpToolAdapter:
         idempotency_key: UUID,
     ) -> ToolResult[NotifyFamilyData]:
         try:
+            # External notification is modeled as a tool but remains behind the
+            # confirmed-action boundary, not Companion's read-only tool list.
             outcome = await _with_timeout(
                 self._settings.notification_timeout_ms,
                 self._notifications.send_stub(
@@ -314,6 +327,8 @@ class McpToolAdapter:
 
         new_drug_entity = await self._drug_knowledge.find_entity(new_drug_name)
         if not new_drug_entity:
+            # Unknown new drugs fail closed into an explainable unknown result so
+            # the UI can ask the pharmacist instead of implying safety.
             return DrugInteractionData(
                 risk_level=DrugInteractionRisk.UNKNOWN,
                 reason_code="no_demo_rule",
@@ -337,6 +352,8 @@ class McpToolAdapter:
                 continue
             med_entity = await self._drug_knowledge.find_entity(med_name)
             if not med_entity:
+                # Missing current-med records reduce confidence for the whole
+                # check; a no-interaction result would be too strong.
                 has_unknown_current = True
                 continue
 
@@ -408,6 +425,8 @@ async def _with_timeout(
     awaitable: Awaitable[TData],
 ) -> TData | None:
     try:
+        # Tool latency is bounded so agent orchestration can degrade gracefully
+        # instead of blocking the live conversation.
         async with asyncio.timeout(timeout_ms / 1000):
             return await awaitable
     except TimeoutError:

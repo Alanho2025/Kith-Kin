@@ -157,6 +157,8 @@ class TurnOrchestrator:
 
         # Fallback for legacy unit tests (e.g., test_turn_orchestrator.py)
         if self._mcp_tool_adapter_factory is None:
+            # Keep the legacy path behaviorally equivalent to the ADK path:
+            # route and safety review complete before Companion can propose cards.
             async with asyncio.TaskGroup() as tg:
                 router_task = tg.create_task(self._router.route(event))
                 guardian_task = tg.create_task(self._guardian.review_turn(event))
@@ -234,7 +236,8 @@ class TurnOrchestrator:
             )
             return TurnOutcome(route, guardian, None, None)
 
-        # 1. Instantiate the ADK session and runner
+        # Build a per-turn MCP adapter from trusted backend context so the agent
+        # cannot supply its own user/session identity to tools.
         session_service = InMemorySessionService()  # type: ignore[no-untyped-call]
         mcp_adapter = self._mcp_tool_adapter_factory(context)
         companion_any: Any = self._companion
@@ -326,9 +329,12 @@ class TurnOrchestrator:
                     unresolved = val.get("unresolved_questions", [])
                     prior_summary = f"{advice}. Unresolved: {', '.join(unresolved)}"
             except Exception:
+                # Prior summary is recall context only; failure should not block
+                # current-turn routing, Guardian review, or translation.
                 pass
 
-        # Load prompt instruction
+        # The prompt is rebuilt per turn so warmed profile data and recent
+        # conversation context are explicit inputs, not hidden global state.
         base_prompt = load_companion_prompt_template()
         companion_instruction = build_companion_instruction(
             base_prompt, meds, allergies, prior_summary, conversation_context
@@ -344,7 +350,8 @@ class TurnOrchestrator:
             make_submit_response_cards(clock=submit_clock),
         ]
 
-        # Use the companion ADK agent instance and clone it with bound tools/prompts
+        # Clone instead of mutating the shared Companion instance; tool bindings
+        # and instructions are scoped to this one pharmacy turn.
         companion_agent = companion_any.clone(
             update={
                 "instruction": companion_instruction,
@@ -354,11 +361,13 @@ class TurnOrchestrator:
         if self._settings and self._settings.gemini_text_model:
             companion_agent.model = self._settings.gemini_text_model
 
-        # Clone router and guardian to prevent parent reuse validation errors
+        # Clone Router and Guardian so ADK parent ownership from previous runs
+        # cannot leak into this orchestrator graph.
         router_clone = self._router.clone()
         guardian_clone = self._guardian.clone()
 
-        # Build root orchestrator
+        # The root orchestrator owns sequencing, but the same deterministic
+        # route/guardian decisions are also stored in session state below.
         orchestrator_agent = OrchestratorAgent(
             router=router_clone,
             guardian=guardian_clone,
@@ -370,6 +379,8 @@ class TurnOrchestrator:
         session_id = str(event.session_id)
 
         if self._settings and getattr(self._settings, "live_transport", None) == "backend_proxy":
+            # The backend proxy path avoids a nested live ADK run while preserving
+            # the same proposal and Guardian card-review gates.
             proposal = await self._companion.propose_cards(
                 event,
                 route,
@@ -393,6 +404,8 @@ class TurnOrchestrator:
         session.state["route_decision"] = route.model_dump(mode="json")
         session.state["guardian_decision"] = guardian.model_dump(mode="json")
 
+        # Store gate results before the runner starts so sub-agents reason from
+        # the already-reviewed route and Guardian decision.
         runner = Runner(
             app_name="agents",
             agent=orchestrator_agent,
@@ -465,6 +478,8 @@ class TurnOrchestrator:
             if proposal_data:
                 proposal = CardSetProposal.model_validate(proposal_data)
             else:
+                # Materialize semantic drafts in backend code so card IDs,
+                # expiry, and executable actions are not controlled by the LLM.
                 draft = CompanionCardDraftSet.model_validate(draft_data)
                 proposal = materialize_companion_card_draft(
                     draft,
@@ -478,6 +493,8 @@ class TurnOrchestrator:
                     "card_review_data missing from session state; "
                     "running deterministic card review fallback"
                 )
+                # If the ADK graph did not persist card_review, fail back to the
+                # same Guardian review before any card can be registered.
                 card_review = await self._guardian.review_cards(proposal.card_set)
                 session.state["card_review"] = card_review.model_dump(mode="json")
             else:
@@ -493,7 +510,8 @@ class TurnOrchestrator:
                 action_types=tuple(card.action.type.value for card in proposal.card_set.cards),
                 card_review=card_review.decision.value,
             )
-            # Register card set if allowed
+            # Registration is the point where cards become selectable; it happens
+            # only after Guardian card review allows the sanitized card set.
             if card_review.decision is GuardianDecisionType.ALLOW and self._cards is not None:
                 self._cards.register_card_set(proposal.card_set, context)
                 conversation_log(

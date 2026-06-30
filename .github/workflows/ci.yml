@@ -126,6 +126,7 @@ jobs:
   # ---------- Real Gemini Evaluation Gates: scheduled / main / manual observability ----------
   live-eval:
     name: Live Gemini API Evaluation Gates
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     env:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}

@@ -35,6 +35,8 @@ class CardService:
         self._card_sets: dict[tuple[str, str], CardSet] = {}
         self._card_contexts: dict[str, TrustedRequestContext] = {}
         self._lock = asyncio.Lock()
+        # Confirmation and cancellation share one lock so a card action can be
+        # executed exactly once even when the UI retries or double-clicks.
         self._confirm_lock = asyncio.Lock()
 
     def discard_session(self, session_id: UUID) -> None:
@@ -48,6 +50,8 @@ class CardService:
 
     def register_card_set(self, card_set: CardSet, context: TrustedRequestContext) -> None:
         """Store an approved card set for later selection; no action is executed."""
+        # Registration grants no authority by itself. The client must still
+        # select a card and confirm a server-minted confirmation ID.
         # register_card_set is called from synchronous orchestrator context; the asyncio.Lock
         # is not needed here because dict mutation is GIL-protected and this method does not
         # await. Use direct assignment — callers that need serialisation must do so externally.
@@ -86,6 +90,8 @@ class CardService:
                 raise CardConfirmationError("CARD_EXPIRED")
             card = _find_card(card_set, command.card_id)
             confirmation_id = f"confirmation_{uuid4()}"
+            # Store the executable action hash at selection time so confirm can
+            # detect any later mutation of the rendered card payload.
             record = StoredConfirmation(
                 confirmation_id=confirmation_id,
                 session_id=context.session_id,
@@ -124,6 +130,8 @@ class CardService:
             if record.state == "cancelled":
                 raise CardConfirmationError("ACTION_BLOCKED")
             if record.terminal_outcome is not None:
+                # Idempotent retries replay the stored outcome and never execute
+                # side effects a second time.
                 return replace(record.terminal_outcome, replayed=True)
             if record.expires_at <= self._clock():
                 raise CardConfirmationError("CONFIRMATION_EXPIRED")
@@ -132,6 +140,8 @@ class CardService:
                 raise CardConfirmationError("CARD_NOT_FOUND")
             card = _find_card(card_set, record.card_id)
             if _action_hash(card) != record.action_hash:
+                # Card text and action semantics must still match the selected
+                # server-owned payload at confirm time.
                 raise CardConfirmationError("ACTION_INTEGRITY_FAILED")
             outcome = await self._executor.execute(confirmation_id, card, context)
             self._repository.update(replace(record, state="confirmed", terminal_outcome=outcome))

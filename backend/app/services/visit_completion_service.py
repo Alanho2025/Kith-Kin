@@ -11,12 +11,10 @@ from app.domain.credentials import TrustedRequestContext
 from app.repositories.confirmation_repository import InMemoryConfirmationRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.schemas.cards import ResponseCard
-from app.services.confirmed_action_executor import ConfirmedActionExecutor
-from app.services.visit_summary_service import VisitSummaryService
-from app.services.notification_service import NotificationService
 from app.schemas.visit_summary import SummaryReview
-
-
+from app.services.confirmed_action_executor import ConfirmedActionExecutor
+from app.services.notification_service import NotificationService
+from app.services.visit_summary_service import VisitSummaryService
 
 
 class VisitCompletionService:
@@ -117,6 +115,5 @@ class VisitCompletionExecutor(ConfirmedActionExecutor):
             phase="succeeded",
             code=None,
         )
-
 
 

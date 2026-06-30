@@ -54,7 +54,8 @@ export class AudioPlayer {
       return;
     }
 
-    // Convert Int16Array back to Float32Array for AudioBuffer
+    // Provider audio arrives as signed 16-bit PCM; Web Audio playback requires
+    // normalized float samples.
     const int16Array = new Int16Array(pcmBuffer);
     const float32Array = new Float32Array(int16Array.length);
     for (let i = 0; i < int16Array.length; i++) {
@@ -68,7 +69,8 @@ export class AudioPlayer {
     source.buffer = audioBuffer;
     source.connect(this.audioContext.destination);
 
-    // Schedule playback back-to-back without overlapping or silence gaps
+    // Schedule chunks back-to-back to preserve provider TTS cadence without
+    // overlapping frames or inserting silence between socket messages.
     const currentTime = this.audioContext.currentTime;
     if (this.nextPlayTime < currentTime) {
       this.nextPlayTime = currentTime;

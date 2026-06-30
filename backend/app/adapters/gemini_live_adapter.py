@@ -37,6 +37,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
         self._ctx = ctx
         self._session = session
         self._current_speaker = current_speaker
+        # The queue isolates SDK callbacks from runtime delivery so provider
+        # quirks are normalized before any WebSocket event is emitted.
         self._queue: asyncio.Queue[ProviderLiveEvent | None] = asyncio.Queue()
         self._closed = False
         self._current_utterance_id = f"utt_{uuid4()}"
@@ -134,6 +136,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
     async def _flush_current_transcript_final(self) -> None:
         if not self._current_transcript_text:
             return
+        # The live-translate model can stream cumulative partials without a
+        # final flag; silence converts the accumulated utterance into one final.
         flat_msg = {
             "type": "input_transcription",
             "event_id": f"evt_{uuid4()}",
@@ -175,7 +179,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
             await self._queue.put(None)
 
     async def _process_message(self, msg: Any) -> None:
-        # 1. Check for tool calls
+        # Normalize tool calls even though the current runtime uses Live mainly
+        # as a voice bridge; future tool handling should not depend on SDK types.
         if msg.tool_call and msg.tool_call.function_calls:
             conversation_log(
                 "gemini_live.provider.tool_call",
@@ -191,7 +196,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 await self._queue.put(tool_event)
             return
 
-        # 2. Check for server content (transcriptions and audio)
+        # Server content can bundle input transcripts, model audio, text, and
+        # completion markers in one SDK message.
         if msg.server_content:
             content = msg.server_content
             conversation_log(
@@ -213,6 +219,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 )
                 accumulated_text = _merge_transcript_text(self._current_transcript_text, text)
                 self._current_transcript_text = accumulated_text
+                # Emit accumulated text for partials so the frontend can replace
+                # one utterance in place instead of stitching provider deltas.
                 flat_msg = {
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
@@ -235,7 +243,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                     self._revision += 1
                     self._last_partial_at = asyncio.get_event_loop().time()
 
-            # Chinese generated audio
+            # Generated audio is forwarded as opaque bytes; provider text parts
+            # remain diagnostics and do not become transcript text.
             if content.model_turn and content.model_turn.parts:
                 audio_part_count = 0
                 text_part_count = 0
@@ -267,6 +276,8 @@ class GeminiLiveSessionPort(LiveSessionPort):
                 )
             if content.turn_complete:
                 conversation_log("gemini_live.provider.turn_complete")
+                # Reuse a transcript-shaped marker so runtime speech sessions
+                # close without depending on raw SDK completion objects.
                 flat_msg = {
                     "type": "input_transcription",
                     "event_id": f"evt_{uuid4()}",
@@ -311,7 +322,8 @@ class GeminiLiveAdapter(GeminiLiveGateway):
 
             client = genai.Client(api_key=key_val)
 
-            # Configure LiveConnectConfig
+            # Request audio output plus input/output transcription so runtime
+            # audio gating can be driven by provider events.
             config = types.LiveConnectConfig(
                 response_modalities=["AUDIO"],
                 system_instruction=context.system_instruction,
@@ -325,7 +337,8 @@ class GeminiLiveAdapter(GeminiLiveGateway):
                 ),
             )
 
-            # Connect using gemini-3.5-live-translate-preview
+            # Keep the model configurable for validation while defaulting to the
+            # live-translate preview used by the product flow.
             model_name = (
                 self._settings.gemini_live_translate_model or "gemini-3.5-live-translate-preview"
             )
@@ -354,6 +367,8 @@ class GeminiLiveAdapter(GeminiLiveGateway):
         message_type = str(message.get("type", ""))
         provider_event_id = str(message.get("event_id", "provider_event"))
         if message_type == "input_transcription":
+            # Runtime code consumes provider-neutral events, not SDK objects or
+            # provider-specific field names.
             final = bool(message.get("final", False))
             return ProviderTranscriptEvent(
                 event_type=(

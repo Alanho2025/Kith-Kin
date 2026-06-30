@@ -1,13 +1,14 @@
 """Visit summary compilation and text extraction service."""
 
 import logging
-from uuid import UUID
 
 from app.schemas.visit_summary import SummaryReview
 
 logger = logging.getLogger(__name__)
 
 
+# Keep aliases deterministic and local to the demo so summaries are explainable
+# without calling an external drug database at visit-completion time.
 DRUG_ALIASES: dict[str, tuple[str, ...]] = {
     "amlodipine": ("amlodipine", "norvasc"),
     "atorvastatin": ("atorvastatin", "lipitor"),
@@ -25,6 +26,8 @@ DRUG_ALIASES: dict[str, tuple[str, ...]] = {
 
 def _extract_mentioned_drugs(text: str) -> list[str]:
     lower_text = text.lower()
+    # Return canonical names only; display translation happens later so this
+    # service stays focused on structured summary fields.
     mentioned = {
         canonical
         for canonical, aliases in DRUG_ALIASES.items()
@@ -43,6 +46,8 @@ def _summarize_pharmacist_lines(lines: list[str]) -> str:
     summary = "Pharmacist said: " + " ".join(_normalise_space(line) for line in lines)
     if len(summary) <= 1000:
         return summary
+    # Bound generated memory text so one long transcript cannot create an
+    # oversized local memory or notification payload.
     return f"{summary[:997].rstrip()}..."
 
 
@@ -110,6 +115,8 @@ def _unique_preserve(items: list[str]) -> list[str]:
         normalised = _normalise_space(item)
         key = normalised.lower()
         if key and key not in seen:
+            # Preserve first-seen order because transcript order is the user's
+            # review order on the final summary screen.
             seen.add(key)
             unique.append(normalised)
     return unique
@@ -123,6 +130,8 @@ class VisitSummaryService:
         transcripts: list[tuple[str, str]] = []
         for event in events:
             if event.get("event_type") == "transcript.final":
+                # Use only final transcripts; partial events are unstable and
+                # should not be persisted into memory or family follow-up.
                 payload = event.get("payload", {})
                 if isinstance(payload, dict):
                     speaker = payload.get("speaker", "unknown")
@@ -134,6 +143,8 @@ class VisitSummaryService:
         pharmacist_lines = [
             text for speaker, text in transcripts if speaker == "pharmacist"
         ]
+        # Parent questions are treated as unresolved follow-up unless a later
+        # workflow explicitly confirms them resolved.
         parent_questions = [
             text
             for speaker, text in transcripts
@@ -148,6 +159,8 @@ class VisitSummaryService:
         )
         family_notification_requested = _has_family_request(all_text)
 
+        # This method prepares a draft only. Memory writes and family sends are
+        # still gated by confirmed actions in VisitCompletionService.
         return SummaryReview(
             mentioned_drugs=tuple(mentioned_drugs),
             pharmacist_advice_summary=pharmacist_advice_summary,

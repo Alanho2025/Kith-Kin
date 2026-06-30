@@ -12,6 +12,8 @@ const CONTROL_CLASS =
 export function BottomControls({ onCommand }: BottomControlsProps) {
   const endSession = () => {
     conversationDebug("bottom_controls.end.click");
+    // End session is the only bottom control with a browser confirmation because
+    // it moves the conversation into final summary/review.
     if (window.confirm("确定结束本次药房对话？")) {
       conversationDebug("bottom_controls.end.confirmed");
       onCommand({ eventType: "session.end", payload: { reason: "user_completed" } });

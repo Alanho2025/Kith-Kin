@@ -178,6 +178,8 @@ class LiveRuntimeService:
             action_type=action_type.value,
             spoken_text=text,
         )
+        # Mute inbound audio before TTS so the provider cannot transcribe or
+        # react to Kith&Kin's own spoken response.
         muted_evt = self._append_event(
             session_id,
             "audio.muted",
@@ -288,6 +290,8 @@ class LiveRuntimeService:
         websocket: WebSocket,
         session_id: UUID,
     ) -> None:
+        # Unmute and re-enter listening as separate events because the client
+        # audio gate and UI status reducer consume them independently.
         muted_evt = self._append_event(
             session_id,
             "audio.muted",
@@ -322,6 +326,8 @@ class LiveRuntimeService:
             and buffer
             and last_seen_sequence < self._sequence(buffer[0]) - 1
         ):
+            # The bounded replay window protects memory use; clients outside the
+            # window must start a new session instead of receiving a partial gap.
             fallback = self._event(
                 session_id,
                 self._sequence(buffer[-1]) + 1,
@@ -343,6 +349,8 @@ class LiveRuntimeService:
             if last_seen_sequence is None
             else [event for event in buffer if self._sequence(event) > last_seen_sequence]
         )
+        # Replay buffered events before opening provider loops so reconnecting
+        # clients rebuild UI state in the original runtime order.
         for event in events:
             await websocket.send_json(event)
 
@@ -426,11 +434,15 @@ class LiveRuntimeService:
         except (ValueError, json.JSONDecodeError):
             return
         if isinstance(event, AudioSpeakerChangedEvent):
+            # The browser owns the active mic target; provider transcripts are
+            # later stamped with this speaker to keep UI labels stable.
             self._speaker_sessions[session_id] = event.payload.speaker
             return
         if isinstance(event, TranscriptFinalEvent):
             from app.adapters.provider_schemas import ProviderLiveEventType, ProviderTranscriptEvent
 
+            # Typed fallback follows the same transcript pipeline as provider
+            # audio so translation, cards, and replay behavior remain identical.
             provider_event = ProviderTranscriptEvent(
                 event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
                 provider_event_id=event.event_id,
@@ -476,6 +488,8 @@ class LiveRuntimeService:
             elif isinstance(event, RepeatEvent):
                 self._paused_sessions.discard(session_id)
 
+            # Shared command handling keeps HTTP and WebSocket card semantics in
+            # one service; this runtime only appends and streams the resulting events.
             outcomes = await self._command_service.handle(event, session_id=session_id)
             for outcome in outcomes:
                 emitted = self._append_event(
@@ -497,7 +511,10 @@ class LiveRuntimeService:
                         event.payload.confirmation_id,
                         context,
                     )
-                    result = await self._cards.confirm_selected(event.payload.confirmation_id, context)
+                    result = await self._cards.confirm_selected(
+                        event.payload.confirmation_id,
+                        context,
+                    )
                     from app.core.constants import CardActionType
 
                     should_voice_action = result.action_type in (
@@ -589,6 +606,8 @@ class LiveRuntimeService:
             and active_speaker is not None
             and provider_event.utterance_id != "turn_complete"
         ):
+            # Gemini may not know which human is speaking; use the browser's
+            # selected mic mode as the runtime authority for speaker labels.
             conversation_log(
                 "live.provider_transcript.speaker_override",
                 session=session_ref(session_id),
@@ -599,7 +618,8 @@ class LiveRuntimeService:
             )
             provider_event = replace(provider_event, speaker=active_speaker)
 
-        # Filter out self-echoes of Kith & Kin's TTS spoken English
+        # Filter out self-echoes of Kith&Kin's TTS so the app does not create
+        # response cards from its own spoken English.
         last_spoken = self._last_spoken_text.get(session_id)
         if last_spoken and provider_event.text:
             import re
@@ -686,6 +706,8 @@ class LiveRuntimeService:
                 return tuple(await self._append_turn_outcome(session_id, transcript, emitted))
             return tuple(emitted)
         if self._translation_service.has_seen(provider_event.utterance_id):
+            # Final utterances are append-only. Duplicate finals should not
+            # create repeated Chinese segments or repeated response cards.
             conversation_log(
                 "live.translation.skipped_duplicate",
                 session=session_ref(session_id),
@@ -703,6 +725,8 @@ class LiveRuntimeService:
             source_language=provider_event.language,
             text=provider_event.text,
         )
+        # Emit a pending state before the sidecar call so the UI can show that a
+        # finalized English transcript is waiting on faithful translation.
         emitted.append(
             self._append_event(
                 session_id,
@@ -767,6 +791,8 @@ class LiveRuntimeService:
             utterance_id=provider_event.utterance_id,
             code=fallback.code,
         )
+        # Translation degradation is non-fatal; keep the English transcript and
+        # continue agent/card processing so the conversation can proceed.
         emitted.append(
             self._append_event(
                 session_id,
@@ -794,6 +820,8 @@ class LiveRuntimeService:
     ) -> None:
         lock = self._locks.setdefault(session_id, asyncio.Lock())
         async with lock:
+            # Background turn outcomes are serialized per session so card and
+            # route events keep deterministic order after typed fallback input.
             try:
                 outcomes = await self._append_turn_outcome(session_id, transcript, [])
                 for outcome in outcomes:
@@ -848,6 +876,8 @@ class LiveRuntimeService:
             return emitted
         event = TranscriptFinalEvent.model_validate(transcript)
         if event.payload.speaker != "pharmacist":
+            # Only pharmacist turns can generate advice cards; parent speech is
+            # user intent/context and should not trigger autonomous suggestions.
             conversation_log(
                 "live.turn_outcome.skipped",
                 session=session_ref(session_id),
@@ -857,6 +887,8 @@ class LiveRuntimeService:
             )
             return emitted
         if _is_identity_request(event.payload.text.lower()):
+            # Identity requests get deterministic grounding cards instead of
+            # model-authored disclosure text.
             conversation_log(
                 "live.turn_outcome.identity_request",
                 session=session_ref(session_id),
@@ -927,6 +959,8 @@ class LiveRuntimeService:
             guardian_reason=outcome.guardian.reason_code.value,
         )
         if outcome.guardian.decision is GuardianDecisionType.BLOCK:
+            # Guardian blocks halt card execution paths but still keep the
+            # translated transcript visible for conversation continuity.
             conversation_log(
                 "live.turn_outcome.guardian_block",
                 session=session_ref(session_id),
@@ -982,6 +1016,8 @@ class LiveRuntimeService:
                     )
                 )
                 return emitted
+            # Register only after deterministic checks pass; the UI sees card
+            # text, but executable authority remains in CardService.
             self._cards.register_card_set(
                 card_set,
                 TrustedRequestContext(
@@ -1078,6 +1114,8 @@ class LiveRuntimeService:
         card_text = " ".join(
             f"{card.zh_text} {card.en_text} {card.speak_zh or ''}" for card in card_set.cards
         ).lower()
+        # This deterministic pass catches high-risk card shapes even when the
+        # model and Guardian review already returned an allow decision.
         if _is_identity_request(latest):
             return self._identity_card_set(event)
         if _bundles_medication_and_allergy(card_text):
@@ -1227,6 +1265,7 @@ class LiveRuntimeService:
         )
         buffer.append(event)
         if len(buffer) > self.MAX_BUFFERED_EVENTS:
+            # Keep replay bounded; resume gaps are handled at connection time.
             del buffer[: -self.MAX_BUFFERED_EVENTS]
         return event
 
@@ -1268,6 +1307,9 @@ class LiveRuntimeService:
         }
 
     async def _serve_real_live(self, websocket: WebSocket, session_id: UUID) -> None:
+        # The provider is configured as a bridge, not an autonomous assistant:
+        # it listens/transcribes pharmacist audio and only speaks text that this
+        # backend explicitly sends after parent confirmation.
         system_instruction = (
             "You are Kith&Kin's real-time voice bridge. "
             "You are listening to the pharmacist speaking English. "
@@ -1321,6 +1363,8 @@ class LiveRuntimeService:
             return
 
         try:
+            # Client and provider loops race; when either side ends, cancel the
+            # other so microphone/audio resources do not outlive the socket.
             tasks = {
                 asyncio.create_task(self._read_client_loop(websocket, session_id, port)),
                 asyncio.create_task(self._read_provider_loop(websocket, session_id, port)),
@@ -1373,6 +1417,8 @@ class LiveRuntimeService:
                     try:
                         await self._handle_live_command(websocket, session_id, text, port)
                     except Exception as exc:
+                        # Command failures should degrade card generation, not
+                        # tear down the live audio session mid-conversation.
                         logging.getLogger(__name__).warning(
                             "Live command processing failed without closing audio transport: %s",
                             exc,
@@ -1401,6 +1447,8 @@ class LiveRuntimeService:
         async for event in port.events():
             if isinstance(event, ProviderAudioEvent):
                 if session_id not in self._speech_sessions:
+                    # Provider audio is allowed only during backend-initiated
+                    # speech sessions; unsolicited model audio is dropped.
                     conversation_log(
                         "live.provider_audio.ignored",
                         session=session_ref(session_id),
@@ -1429,6 +1477,9 @@ class LiveRuntimeService:
                     text=event.text,
                 )
                 if session_id in self._paused_sessions:
+                    # While the parent has paused or chosen self-speech, ignore
+                    # provider transcripts so stale overheard speech does not
+                    # update cards or summaries.
                     conversation_log(
                         "live.provider_event.skipped_paused",
                         session=session_ref(session_id),
@@ -1437,6 +1488,9 @@ class LiveRuntimeService:
                     )
                     continue
                 if event.language == "zh":
+                    # Gemini live-translate can emit Chinese final text directly;
+                    # normalize it into the same translation.final stream used by
+                    # the sidecar translator.
                     is_final = event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
                     if is_final:
                         trans_final_evt = self._append_event(
@@ -1459,6 +1513,8 @@ class LiveRuntimeService:
                             await websocket.send_json(out)
                 elif event.utterance_id == "turn_complete":
                     if session_id in self._speech_sessions:
+                        # turn_complete closes one backend-requested speech
+                        # action and decides whether audio delivery succeeded.
                         action = self._active_speech_actions.get(session_id)
                         saw_audio = session_id in self._speech_audio_seen
                         conversation_log(
@@ -1542,6 +1598,9 @@ class LiveRuntimeService:
                         await websocket.send_json(out)
                     is_final = event.event_type == ProviderLiveEventType.TRANSCRIPT_FINAL
                     if is_final and model_speaking:
+                        # Some provider sessions finish speech via a final
+                        # transcript instead of turn_complete; reset the same
+                        # client audio state to avoid leaving the mic muted.
                         model_speaking = False
                         self._speech_sessions.discard(session_id)
                         self._speech_audio_seen.discard(session_id)
@@ -1613,6 +1672,8 @@ class LiveRuntimeService:
                 language=event.payload.language,
                 text=event.payload.text,
             )
+            # Typed fallback bypasses live audio but still feeds the exact same
+            # provider-event path used by microphone transcription.
             provider_event = ProviderTranscriptEvent(
                 event_type=ProviderLiveEventType.TRANSCRIPT_FINAL,
                 provider_event_id=event.event_id,
@@ -1676,6 +1737,8 @@ class LiveRuntimeService:
                 self._paused_sessions.discard(session_id)
                 repeat_text = "Could you please say that again?"
                 conversation_log("live.repeat.tts_request", session=session_ref(session_id))
+                # Repeat is voiced through the provider so audio completion is
+                # tracked with the same speech-session state as card speech.
                 muted_evt = self._append_event(
                     session_id,
                     "audio.muted",
@@ -1705,7 +1768,8 @@ class LiveRuntimeService:
                 )
                 await websocket.send_json(emitted)
 
-            # Generate and emit summary.render on SessionEndEvent
+            # The final summary is rendered as a review event first; delivery or
+            # persistence still requires a confirmed follow-up action.
             if isinstance(event, SessionEndEvent) and self._completion_service is not None:
                 conversation_log(
                     "live.session_end.summary.start",
@@ -1782,6 +1846,8 @@ class LiveRuntimeService:
                 origin="runtime",
             )
             try:
+                # Resolve the server-owned card before confirming so provider
+                # speech uses trusted card text, never client-supplied text.
                 card = self._cards.get_card_by_confirmation(
                     event.payload.confirmation_id,
                     context,
@@ -1872,6 +1938,8 @@ class LiveRuntimeService:
                     action_type=confirmation_outcome.action_type.value,
                     spoken_text=card.en_text,
                 )
+                # In real-live mode, provider text-to-speech produces the audio;
+                # mark the speech session so only expected audio is forwarded.
                 muted_evt = self._append_event(
                     session_id,
                     "audio.muted",

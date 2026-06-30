@@ -62,6 +62,8 @@ const KNOWN_RUNTIME_EVENTS = new Set([
 ]);
 
 export function mapRuntimeEvent(input: unknown): RuntimeViewEvent {
+  // Validate the shared envelope first so unknown event types can still advance
+  // sequence/replay state without exposing untrusted payloads to reducers.
   const envelope = runtimeEnvelopeSchema.parse(input);
   if (envelope.event_type !== "transcript.final") {
     return {
@@ -72,11 +74,15 @@ export function mapRuntimeEvent(input: unknown): RuntimeViewEvent {
       sequence: envelope.sequence,
       timestamp: envelope.timestamp,
       correlationId: envelope.correlation_id,
+      // Unknown payloads are dropped at the mapper boundary while preserving the
+      // event shell for diagnostics and future contract evolution.
       payload: KNOWN_RUNTIME_EVENTS.has(envelope.event_type) ? envelope.payload : null,
     };
   }
   const event = transcriptFinalWireSchema.parse(input);
 
+  // transcript.final drives the conversation log, so its payload gets a tighter
+  // schema than generic events before converting snake_case to view fields.
   return {
     schemaVersion: event.schema_version,
     eventId: event.event_id,

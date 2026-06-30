@@ -43,6 +43,8 @@ class RuntimeCommandService:
         session_id: UUID,
         origin: str = "runtime",
     ) -> tuple[RuntimeCommandEvent, ...]:
+        # The runtime connection supplies trusted identity; client commands only
+        # name card/session objects and never carry user authority.
         context = TrustedRequestContext(session_id=session_id, user_id=self._user_id, origin=origin)
         if isinstance(event, CardSelectEvent):
             selected = await self._cards.select(
@@ -76,6 +78,9 @@ class RuntimeCommandService:
                     "replayed": outcome.replayed,
                 }
             except CardConfirmationError as error:
+                # Confirmation failures are surfaced as blocked action events so
+                # the UI can recover without treating policy/state errors as
+                # transport failures.
                 payload = {
                     "confirmation_id": event.payload.confirmation_id,
                     "action_type": CardActionType.NO_ACTION.value,
@@ -99,6 +104,8 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, SelfSpeakEvent):
+            # Manual speech controls revoke any pending card authority because
+            # the parent has chosen to speak outside the prepared response flow.
             await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
@@ -113,6 +120,8 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, PleaseWaitEvent):
+            # Pausing the conversation also cancels pending confirmations to
+            # avoid executing stale cards after context has changed.
             await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(
@@ -127,7 +136,8 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, RepeatEvent):
-            # Acknowledge the repeat request by signaling that we are listening
+            # Repeat is a listening-control request, not a card action, so it
+            # acknowledges readiness without mutating card confirmation state.
             return (
                 RuntimeCommandEvent(
                     "audio.listening",
@@ -136,6 +146,7 @@ class RuntimeCommandService:
                 ),
             )
         if isinstance(event, SessionEndEvent):
+            # Ending a session makes every unconfirmed card non-actionable.
             await self._cards.cancel_all_pending(context)
             return (
                 RuntimeCommandEvent(

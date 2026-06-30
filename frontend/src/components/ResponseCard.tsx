@@ -24,6 +24,8 @@ export function ResponseCard({
           recommended,
           card,
         });
+        // A click only selects the card; the confirmation panel performs the
+        // separate authorization step before any speech/action.
         onSelect(card);
       }}
       className="group w-full rounded-2xl border-2 border-slate-200 bg-white px-5 py-5 text-left transition hover:border-teal-600 hover:bg-teal-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-300"
