@@ -30,6 +30,25 @@ def test_ci_labels_match_current_eval_suite_size() -> None:
     assert "24 cases" in workflow
 
 
+def test_ci_keeps_live_gemini_out_of_required_pr_and_merge_queue_gates() -> None:
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    live_job = workflow.split("  live-eval:", 1)[1].split("  # ---------- Unified", 1)[0]
+    report_job = workflow.split("  report:", 1)[1]
+
+    assert "merge_group:" in workflow
+    assert "schedule:" in workflow
+    assert "deterministic-e2e:" in workflow
+    assert "PLAYWRIGHT_BACKEND_MODE: deterministic" in workflow
+    assert "npx playwright test e2e/pharmacy-backend-deterministic.spec.ts" in workflow
+    assert (ROOT / "backend/app/deterministic_main.py").exists()
+    assert "PLAYWRIGHT_BACKEND_MODE: live_gemini" in live_job
+    assert "--require-live-companion" in live_job
+    assert "github.event_name == 'pull_request'" not in live_job
+    assert "merge_group" not in live_job
+    assert "deterministic_e2e_res" in report_job
+    assert "workflow_dispatch" in report_job
+
+
 def test_every_case_maps_all_required_eval_dimensions() -> None:
     suite = RUNNER._load_suite(EVAL_ROOT / "cases.json")
 

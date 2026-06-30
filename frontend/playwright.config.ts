@@ -3,7 +3,15 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-function loadGoogleApiKey(): string {
+type PlaywrightBackendMode = "deterministic" | "live_gemini";
+
+function getBackendMode(): PlaywrightBackendMode {
+  return process.env.PLAYWRIGHT_BACKEND_MODE === "deterministic"
+    ? "deterministic"
+    : "live_gemini";
+}
+
+function loadGoogleApiKey(required: boolean): string | undefined {
   if (process.env.GOOGLE_API_KEY) return process.env.GOOGLE_API_KEY;
 
   const envPath = path.resolve("../backend/.env");
@@ -16,12 +24,15 @@ function loadGoogleApiKey(): string {
     if (value) return value.replace(/^['"]|['"]$/g, "");
   }
 
+  if (!required) return undefined;
+
   throw new Error(
     "GOOGLE_API_KEY is required for Playwright live backend tests. Set it in the environment or backend/.env.",
   );
 }
 
-const googleApiKey = loadGoogleApiKey();
+const backendMode = getBackendMode();
+const googleApiKey = loadGoogleApiKey(backendMode === "live_gemini");
 
 export function createLiveDatabaseUrl(pid = process.pid): string {
   const tempRoot = process.env.RUNNER_TEMP || os.tmpdir();
@@ -31,9 +42,11 @@ export function createLiveDatabaseUrl(pid = process.pid): string {
 
 const liveDatabaseUrl = createLiveDatabaseUrl();
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === "1";
+const backendAppModule =
+  backendMode === "live_gemini" ? "app.main:app" : "app.deterministic_main:app";
 const backendCommand = [
   `.venv/bin/python ../scripts/seed_demo_data.py --database-url ${liveDatabaseUrl}`,
-  ".venv/bin/python -u -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+  `.venv/bin/python -u -m uvicorn ${backendAppModule} --host 127.0.0.1 --port 8000`,
 ].join(" && ");
 
 export default defineConfig({
@@ -71,9 +84,9 @@ export default defineConfig({
       cwd: "../backend",
       env: {
         ...process.env,
-        GOOGLE_API_KEY: googleApiKey,
-        GEMINI_API_KEY: googleApiKey,
-        LIVE_TRANSPORT: "gemini_live",
+        GOOGLE_API_KEY: googleApiKey ?? "",
+        GEMINI_API_KEY: googleApiKey ?? "",
+        LIVE_TRANSPORT: backendMode === "live_gemini" ? "gemini_live" : "backend_proxy",
         DATABASE_URL: liveDatabaseUrl,
       },
       port: 8000,

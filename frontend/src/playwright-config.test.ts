@@ -13,4 +13,18 @@ describe("Playwright live backend config", () => {
     );
     expect(createLiveDatabaseUrl(12345)).not.toContain("/private/tmp");
   });
+
+  it("does not require a Google API key for deterministic backend mode", async () => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.stubEnv("PLAYWRIGHT_BACKEND_MODE", "deterministic");
+
+    const config = await import("../playwright.config");
+    const webServers = config.default.webServer;
+
+    expect(Array.isArray(webServers)).toBe(true);
+    expect(Array.isArray(webServers) ? webServers[0].command : "").toContain(
+      "app.deterministic_main:app",
+    );
+  });
 });

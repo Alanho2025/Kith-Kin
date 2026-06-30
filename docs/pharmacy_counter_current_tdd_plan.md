@@ -10,11 +10,12 @@ Commands run:
 
 - `npm run typecheck` in `frontend`: pass
 - `npm run lint` in `frontend`: pass
-- `npm run test` in `frontend`: 14 files, 53 tests passed after the latest large-print subtitle correction and Playwright CI database-path regression test
+- `npm run test` in `frontend`: 14 files, 54 tests passed after the latest large-print subtitle correction, Playwright CI database-path regression test, and deterministic/live backend mode split
 - `backend/.venv/bin/python -m pytest backend/tests`: 264 passed, 1 skipped, 6 warnings
 - `backend/.venv/bin/python -m pytest backend/tests/integration/mcp/test_seed_demo_data.py backend/tests/integration/mcp/test_drug_interaction.py`: 8 passed after the seed expansion
 - `backend/.venv/bin/python evals/run.py evals/cases.json --report output/evals/conversation-debug-report.json`: 24/24 passed, 23/23 P0 passed
 - `npm run test:e2e -- e2e/pharmacy-backend.spec.ts`: 1 passed after the safe replacement allergy card, Gemini TTS binary audio path, product options, and summary were verified.
+- `PLAYWRIGHT_BACKEND_MODE=deterministic npx playwright test e2e/pharmacy-backend-deterministic.spec.ts`: added as the merge-required CI browser smoke for real backend + seeded DB without real Gemini. Local execution was blocked by the Codex escalated-command usage limit during this CI split; GitHub Actions is expected to run it as part of `deterministic-e2e`.
 
 Important reading of this baseline:
 
